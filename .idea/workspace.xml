@@ -1,5 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
+  <component name="BranchesTreeState">
+    <expand>
+      <path>
+        <item name="ROOT" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="LOCAL_ROOT" type="e8cecc67:BranchNodeDescriptor" />
+      </path>
+      <path>
+        <item name="ROOT" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="REMOTE_ROOT" type="e8cecc67:BranchNodeDescriptor" />
+      </path>
+      <path>
+        <item name="ROOT" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="REMOTE_ROOT" type="e8cecc67:BranchNodeDescriptor" />
+        <item name="GROUP_NODE:origin" type="e8cecc67:BranchNodeDescriptor" />
+      </path>
+    </expand>
+    <select />
+  </component>
   <component name="CMakeRunConfigurationManager" shouldGenerate="true" shouldDeleteObsolete="true">
     <generated />
   </component>
@@ -9,7 +27,10 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="956f5c1e-dfce-40ac-aadd-bed1933a19f0" name="Default Changelist" comment="" />
+    <list default="true" id="956f5c1e-dfce-40ac-aadd-bed1933a19f0" name="Default Changelist" comment="add some annotation">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/neuzz.c" beforeDir="false" afterPath="$PROJECT_DIR$/neuzz.c" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -48,10 +69,37 @@
       <option name="presentableId" value="Default" />
       <updated>1675872665232</updated>
       <workItem from="1675872666289" duration="7958000" />
+      <workItem from="1676030355694" duration="339000" />
+      <workItem from="1676610160274" duration="11100000" />
     </task>
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="add some annotation" />
+    <option name="LAST_COMMIT_MESSAGE" value="add some annotation" />
+  </component>
+  <component name="WindowStateProjectService">
+    <state x="184" y="91" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1676878718030">
+      <screen x="0" y="25" width="1440" height="817" />
+    </state>
+    <state x="184" y="91" key="#com.intellij.execution.impl.EditConfigurationsDialog/-495.-1415.2560.1415/0.25.1440.817@0.25.1440.817" timestamp="1676878718030" />
+    <state x="522" y="351" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2" timestamp="1676610173078">
+      <screen x="0" y="25" width="1440" height="816" />
+    </state>
+    <state x="522" y="351" key="com.intellij.openapi.vcs.update.UpdateOrStatusOptionsDialogupdate-v2/-1648.-1415.2560.1415/0.25.1440.816/912.-1055.1920.1055@0.25.1440.816" timestamp="1676610173078" />
   </component>
 </project>

@@ -25,8 +25,13 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <time.h>
-#include <poll.h>
+//#include <time.h>
+//#include <poll.h>
+
+#include "aflnet.h"
+#include <graphviz/gvc.h>
+#include <math.h>
+
 
 /* Most of code is borrowed directly from AFL fuzzer (https://github.com/mirrorer/afl), credits to Michal Zalewski */
 
@@ -128,12 +133,14 @@ out_dir_fd = -1;             /* FD of the lock file              */
 char *in_dir,                           /* Input directory with test cases  */
 *out_file,                         /* File to fuzz, if any             */
 *out_dir;                          /* Working & output directory       */
-char virgin_bits[MAP_SIZE];             /* Regions yet untouched by fuzzing */
+char virgin_bits[MAP_SIZE];             /* Regions yet untouched by fuzzing（尚未被模糊影响的区域） */
 static int mut_cnt = 0;                 /* Total mutation counter           */
 char *out_buf, *out_buf1, *out_buf2, *out_buf3;
 size_t len;                             /* Maximum file length for every mutation */
 int loc[10000];                         /* Array to store critical bytes locations*/
+//用于存储关键字节位置的数组，也就是我们样例对应的BITMAP
 int sign[10000];                        /* Array to store sign of critical bytes  */
+//数组来存储关键字节的符号，也就是我们的测试样例
 
 /* more fined grined mutation can have better results but slower*/
 //int num_index[23] = {0,2,4,8,16,32,64,128,256,512,1024,1536,2048,2560,3072, 3584,4096,4608,5120, 5632,6144,6656,7103};
@@ -675,6 +682,7 @@ void init_forkserver(char **argv) {
         r.rlim_max = r.rlim_cur = 0;
 
         setrlimit(RLIMIT_CORE, &r); /* Ignore errors */
+
 
         /* Isolate the process and configure standard descriptors. If out_file is
            specified, stdin is /dev/null; otherwise, out_fd is cloned instead. */
@@ -1487,7 +1495,7 @@ void gen_mutate() {
                     out_buf1[loc[index]] = mut_val;
             }
 
-            write_to_testcase(out_buf1, len);
+            write_to_testcase(out_buf1, len); //将修改后的数据写入文件以进行测试
             int fault = run_target(exec_tmout);
             if (fault != 0) {
                 if (fault == FAULT_CRASH) {
@@ -1975,7 +1983,7 @@ void dry_run(char *dir, int stage) {
     while ((entry = readdir(dp)) != NULL) {
         if (stat(entry->d_name, &statbuf) == -1)
             continue;
-        if (S_ISREG(statbuf.st_mode)) {
+        if (S_ISREG(statbuf.st_mode)) { //判断是否是一般文件
             char *tmp = NULL;
             tmp = strstr(entry->d_name, ".");
             if (tmp != entry->d_name) {
@@ -2098,8 +2106,11 @@ void copy_seeds(char *in_dir, char *out_dir) {
 
 /* parse the gradient to guide fuzzing */
 void fuzz_lop(char *grad_file, int sock) {
+    /*首先会运行一次dry_run测试运行放在splice_seed的样例，splice也是AFL的变异手段，中文意思是“绞接”，此阶段会将两个文件拼接起来得到一个新的文件
+    具体地，AFL在seed文件队列中随机选取一个，与当前的seed文件做对比。如果两者差别不大，就再重新随机选一个；如果两者相差比较明显，那么就随机选取一个位置，将两者都分割为头部和尾部。
+    最后，将当前文件的头部与随机文件的尾部拼接起来，就得到了新的文件。在这里，AFL还会过滤掉拼接文件未发生变化的情况*/
     dry_run("./splice_seeds/", 1);
-    copy_file("gradient_info_p", grad_file);
+    copy_file("gradient_info_p", grad_file);//将记录梯度信息的文件拷贝为gradient_info，并将梯度信息文件打开为stream，并重新设置训练阈值
     FILE *stream = fopen(grad_file, "r");
     char *line = NULL;
     size_t llen = 0;
@@ -2114,10 +2125,13 @@ void fuzz_lop(char *grad_file, int sock) {
     if (round_cnt == 0)
         retrain_interval = 750;
 
-    while ((nread = getline(&line, &llen, stream)) != -1) {
+    while ((nread = getline(&line, &llen, stream)) != -1) { //读取梯度文件信息
         line_cnt = line_cnt + 1;
 
         /* send message to python module */
+/*        这里我们之前设置的训练阈值retrain_interval就是用来控制变异的种子个数，
+        当到达训练阈值的时候，系统又会通知nn.py开始收集新的信息进行模型训练*/
+
         if (line_cnt == retrain_interval) {
             round_cnt++;
             now = count_non_255_bytes(virgin_bits);
@@ -2134,21 +2148,21 @@ void fuzz_lop(char *grad_file, int sock) {
             }
         }
 
-        /* parse gradient info */
+        /* parse gradient info */ //处理梯度信息
         char *loc_str = strtok(line, "|");
         char *sign_str = strtok(NULL, "|");
         char *fn = strtok(strtok(NULL, "|"), "\n");
-        parse_array(loc_str, loc);
+        parse_array(loc_str, loc); //这个就是将梯度文件中的一行转化为数组
         parse_array(sign_str, sign);
 
-        /* print edge coverage per 10 files*/
+        /* print edge coverage per 10 files*/ //输出前十个文件的覆盖率
         if ((line_cnt % 10) == 0) {
             printf("$$$$&&&& fuzz %s line_cnt %d\n", fn, line_cnt);
             printf("edge num %d\n", count_non_255_bytes(virgin_bits));
             fflush(stdout);
         }
 
-        /* read seed into mem */
+        /* read seed into mem */ //将种子读入内存
         int fn_fd = open(fn, O_RDONLY);
         if (fn_fd == -1) {
             perror("open failed");
@@ -2163,9 +2177,9 @@ void fuzz_lop(char *grad_file, int sock) {
         memset(out_buf3, 0, 20000);
         ck_read(fn_fd, out_buf, file_len, fn);
 
-        /* generate mutation */
+        /* generate mutation */ //产生突变后的种子
         if (stage_num == 1)
-            gen_mutate();
+            gen_mutate(); //这里就是根据梯度指导信息进行突变产生新的测试样例种子
         else
             gen_mutate_slow();
         close(fn_fd);
@@ -2214,12 +2228,19 @@ void start_fuzz(int f_len) {
 
     len = f_len;
     /* dry run seeds*/
+/*    执行input文件夹下的预先准备的所有testcase（perform_dry_run），生成初始化的queue和bitmap。这只对初始输入执行一次，所以叫：dry run。
+    也就是将所有测试样例都跑一遍，保证没有问题。但是如果一开始的样例就能产生崩溃，程序就不会运行。一般会有以下问题，需要针对性修改testcase
+    Timeout_given ： testcase造成程序timeout的错误，可能来自逻辑错误的语法。
+    Crash ：testcase造成程序崩溃，原因有二：1.样本本身能够造成程序crash 2.程序运行的内存过小造成crash
+    参数stage：
+    状态为1则会保存感兴趣的种子到输出文件夹里，如果状态为2则会计算平均执行时间
+    */
     dry_run(out_dir, 2);
 
     /* start fuzz */
     char buf[16];
     while (1) {
-        if (read(sock, buf, 5) == -1)
+        if (read(sock, buf, 5) == -1) //监听nn.py是否已经通过训练得到所需的权重模型，当接收到已经产生权重模型的信号，就开始执行fuzz_loop
             perror("received failed\n");
         fuzz_lop("gradient_info", sock);
         printf("receive\n");
@@ -2260,7 +2281,7 @@ void start_fuzz_test(int f_len) {
 
 void main(int argc, char *argv[]) {
     int opt;
-    while ((opt = getopt(argc, argv, "+i:o:l:N:D:W:w:Kc:")) > 0)
+    while ((opt = getopt(argc, argv, "+i:o:l:N:D:W:w:Kc:P:R:p:")) > 0)
 
         switch (opt) {
 
@@ -2334,25 +2355,97 @@ void main(int argc, char *argv[]) {
                 cleanup_script = optarg;
                 break;
 
+            case 'P': /* protocol to be tested */
+                if (protocol_selected) FATAL("Multiple -P options not supported");
+
+                if (!strcmp(optarg, "RTSP")) {
+                    extract_requests = &extract_requests_rtsp;
+                    extract_response_codes = &extract_response_codes_rtsp;
+                } else if (!strcmp(optarg, "FTP")) {
+                    extract_requests = &extract_requests_ftp;
+                    extract_response_codes = &extract_response_codes_ftp;
+                } else if (!strcmp(optarg, "DTLS12")) {
+                    extract_requests = &extract_requests_dtls12;
+                    extract_response_codes = &extract_response_codes_dtls12;
+                } else if (!strcmp(optarg, "DNS")) {
+                    extract_requests = &extract_requests_dns;
+                    extract_response_codes = &extract_response_codes_dns;
+                } else if (!strcmp(optarg, "DICOM")) {
+                    extract_requests = &extract_requests_dicom;
+                    extract_response_codes = &extract_response_codes_dicom;
+                } else if (!strcmp(optarg, "SMTP")) {
+                    extract_requests = &extract_requests_smtp;
+                    extract_response_codes = &extract_response_codes_smtp;
+                } else if (!strcmp(optarg, "SSH")) {
+                    extract_requests = &extract_requests_ssh;
+                    extract_response_codes = &extract_response_codes_ssh;
+                } else if (!strcmp(optarg, "TLS")) {
+                    extract_requests = &extract_requests_tls;
+                    extract_response_codes = &extract_response_codes_tls;
+                } else if (!strcmp(optarg, "SIP")) {
+                    extract_requests = &extract_requests_sip;
+                    extract_response_codes = &extract_response_codes_sip;
+                } else if (!strcmp(optarg, "HTTP")) {
+                    extract_requests = &extract_requests_http;
+                    extract_response_codes = &extract_response_codes_http;
+                } else if (!strcmp(optarg, "IPP")) {
+                    extract_requests = &extract_requests_ipp;
+                    extract_response_codes = &extract_response_codes_ipp;
+                } else {
+                    FATAL("%s protocol is not supported yet!", optarg);
+                }
+
+                protocol_selected = 1;
+
+                break;
+
+            case 'R':
+                if (region_level_mutation) FATAL("Multiple -R options not supported");
+                region_level_mutation = 1;
+                break;
+
+            case 'p': /* local port to connect from */
+                //This option is only used for targets that send responses to a specific port number
+                //The Kamailio SIP server is an example
+
+                if (local_port) FATAL("Multiple -l options not supported");
+                local_port = atoi(optarg);
+                if (local_port < 1024 || local_port > 65535) FATAL("Invalid source port number");
+                break;
+
             default:
                 printf("no manual...");
         }
 
-    setup_signal_handlers();//no need
-    check_cpu_governor();// no need
-    get_core_count();// no need
-    bind_to_free_cpu();// no need
-    setup_shm(); // no need
-    init_count_class16();// no need
-    setup_dirs_fds(); // no need
-    if (!out_file) setup_stdio_file();// no need
-    detect_file_args(argv + optind + 1);// no need
-    setup_targetpath(argv[optind]);
+    //AFLNet - Check for required arguments
+    if (!use_net) FATAL("Please specify network information of the server under test (e.g., tcp://127.0.0.1/8554)");
 
-    copy_seeds(in_dir, out_dir);
-    init_forkserver(argv + optind); // no need
+    if (!protocol_selected) FATAL("Please specify the protocol to be tested using the -P option");
 
-    start_fuzz(len);
+    if (netns_name) {
+        if (check_ep_capability(CAP_SYS_ADMIN, argv[0]) != 0)
+            FATAL("Could not run the server under test in a \"%s\" network namespace "
+                  "without CAP_SYS_ADMIN capability.\n You can set it by invoking "
+                  "afl-fuzz with sudo or by \"$ setcap cap_sys_admin+ep /path/to/afl-fuzz\".", netns_name);
+    }
+
+
+    setup_signal_handlers();//no need 设置信号量参数，注册必要的信号处理函数，设置信号句柄
+    check_cpu_governor();// no need 检测CPU的环境配置，检查CPU的管理者
+    get_core_count();// no need 检查CPU核心数
+    bind_to_free_cpu();// no need 构建绑定到特定核心的进程列表。如果什么也找不到，返回-1(抄afl的)
+    setup_shm(); // no need  配置共享内存和virgin_bits FL其最大特点就是会对target进行插桩，以辅助mutated input的生成。具体地，插桩后的target，会记录执行过程中的分支信息；随后，fuzzer便可以根据这些信息，判断这次执行的整体流程和代码覆盖情况。AFL使用共享内存，来完成以上信息在fuzzer和target之间的传递
+    init_count_class16();// no need 调整路径的命中数
+//    setup_ipsm();
+    setup_dirs_fds(); // no need 设置输出目录和文件描述符
+    if (!out_file) setup_stdio_file();// no need 如果out_file为NULL，如果没有使用-f，就删除原本的out_dir/.cur_input，创建一个新的out_dir/.cur_input，保存其文件描述符在out_fd中
+    detect_file_args(argv + optind + 1);// no need 识别参数里面有没有@@，如果有就替换为out_dir/.cur_input，如果没有就返回
+    setup_targetpath(argv[optind]); //设置需要fuzz的目标路径，并组合执行参数
+
+    copy_seeds(in_dir, out_dir); //将用输入的种子直接挪到输出文件夹，供nn.py下一次训练
+    init_forkserver(argv + optind); // no need 启动target进程后，target会运行一个fork server；fuzzer并不负责fork子进程，而是与这个fork server通信，并由fork server来完成fork及继续执行目标的操作。这样设计的最大好处，就是不需要调用execve()，从而节省了载入目标文件和库、解析符号地址等重复性工作fuzzer执行fork()得到父进程和子进程，这里的父进程仍然为fuzzer，子进程则为target进程，即将来的fork server
+
+    start_fuzz(len);//利用nn.py训练得到的模型提取出梯度指导信息从而指导fuzz
     printf("total execs %ld edge coverage %d.\n", total_execs, count_non_255_bytes(virgin_bits));
     return;
 }

@@ -389,14 +389,14 @@ def setup_server():
     conn, addr = sock.accept()
     print('connected by neuzz execution moduel ' + str(addr))
     gen_grad(b"train")
-    conn.sendall(b"start")
+    conn.sendall(b"start") #通知已经生成梯度文件
     while True:
         data = conn.recv(1024)
         if not data:
             break
         else:
             gen_grad(data)
-            conn.sendall(b"start")
+            conn.sendall(b"start") #通知已经生成梯度文件
     conn.close()
 
 

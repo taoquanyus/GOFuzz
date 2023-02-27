@@ -498,8 +498,9 @@ static void handle_stop_sig(int sig) {
 }
 
 /* Check if the current execution path brings anything new to the table.
-   Update virgin bits to reflect the finds. Returns 1 if the only change is
-   the hit-count for a particular tuple; 2 if there are new tuples seen. 
+   Update virgin bits to reflect the finds. Returns
+   1 if the only change is the hit-count for a particular tuple;
+   2 if there are new tuples seen.
    Updates the map, so subsequent calls will always return 0.
    This function is called after every exec() on a fairly large buffer, so
    it needs to be fast. We do this in 32-bit and 64-bit flavors. */

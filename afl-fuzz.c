@@ -23,6 +23,17 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <time.h>
+#include <graphviz/gvc.h>
+#include <math.h>
+
+#include "config.h"
+#include "types.h"
+#include "debug.h"
+#include "alloc-inl.h"
+#include "hash.h"
+#include "aflnet.h"
+
+
 
 /* Most of code is borrowed directly from AFL fuzzer (https://github.com/mirrorer/afl), credits to Michal Zalewski */
 
@@ -2070,7 +2081,33 @@ void start_fuzz_test(int f_len){
     fuzz_lop("gradient_info", sock);
     return;
 }
+/* Initialize the implemented state machine as a graphviz graph */
+/* Initialize the implemented state machine as a graphviz graph */
+void setup_ipsm()
+{
+    ipsm = agopen("g", Agdirected, 0);
 
+    agattr(ipsm, AGNODE, "color", "black"); //Default node colr is black
+    agattr(ipsm, AGEDGE, "color", "black"); //Default edge color is black
+
+    khs_ipsm_paths = kh_init(hs32);
+
+    khms_states = kh_init(hms);
+}
+
+/* Free memory allocated to state-machine variables */
+void destroy_ipsm()
+{
+    agclose(ipsm);
+
+    kh_destroy(hs32, khs_ipsm_paths);
+
+    state_info_t *state;
+    kh_foreach_value(khms_states, state, {ck_free(state->seeds); ck_free(state);});
+    kh_destroy(hms, khms_states);
+
+    ck_free(state_ids);
+}
 
 void main(int argc, char*argv[]){
     int opt;
@@ -2132,7 +2169,7 @@ void main(int argc, char*argv[]){
     //todo 3
     init_forkserver(argv+optind);
 
-    start_fuzz(len);\
+    start_fuzz(len);
     //todo 2
     destroy_ipsm();
     printf("total execs %ld edge coverage %d.\n", total_execs, count_non_255_bytes(virgin_bits));

@@ -147,6 +147,20 @@ int sign[10000];                        /* Array to store sign of critical bytes
 /* default setting, will be change according to different file length */
 int num_index[14] = {0,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192};
 
+
+/* Network part*/
+/* Network part*/
+/* Network part*/
+
+/* Implemented state machine */
+Agraph_t  *ipsm;
+static FILE* ipsm_dot_file;
+
+/* Hash table/map and list */
+klist_t(lms) *kl_messages;
+khash_t(hs32) *khs_ipsm_paths;
+khash_t(hms) *khms_states;
+
 enum {
     /* 00 */ FAULT_NONE,
     /* 01 */ FAULT_TMOUT,
@@ -962,7 +976,7 @@ static u64 get_cur_time_us(void) {
 
 /* Execute target application, monitoring for timeouts. Return status
    information. The called program will update trace_bits[]. */
-
+//todo 这里是重点
 static u8 run_target(int timeout) {
 
     static struct itimerval it;
@@ -1783,6 +1797,7 @@ void gen_mutate_slow(){
 }
 
 /* dry run the seeds at dir, when stage == 1, save interesting seeds to out_dir; when stage == 2, compute the average exec time */
+//todo 把aflnet的queue添加到此处
 void dry_run(char* dir, int stage){
     DIR *dp;
     struct dirent *entry;

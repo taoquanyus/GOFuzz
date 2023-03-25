@@ -34,6 +34,166 @@
 #include "aflnet.h"
 
 
+//||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+// add from aflnet
+static u8 shuffle_queue;
+
+
+static u32 queued_paths,              /* Total number of queued testcases */
+queued_variable,           /* Testcases with variable behavior */
+queued_at_start,           /* Total number of initial inputs   */
+queued_discovered,         /* Items discovered during this run */
+queued_imported,           /* Items imported via -S            */
+queued_favored,            /* Paths deemed favorable           */
+queued_with_cov,           /* Paths with new coverage bytes    */
+pending_not_fuzzed,        /* Queued but not done yet          */
+pending_favored,           /* Pending favored paths            */
+cur_skipped_paths,         /* Abandoned inputs in cur cycle    */
+cur_depth,                 /* Current path depth               */
+max_depth,                 /* Max path depth                   */
+useless_at_start,          /* Number of useless starting paths */
+var_byte_count,            /* Bitmap bytes with var behavior   */
+current_entry,             /* Current queue entry ID           */
+havoc_div = 1;             /* Cycle count divisor for havoc    */
+
+static u64 total_crashes,             /* Total number of crashes          */
+unique_crashes,            /* Crashes with unique signatures   */
+total_tmouts,              /* Total number of timeouts         */
+unique_tmouts,             /* Timeouts with unique signatures  */
+unique_hangs,              /* Hangs with unique signatures     */
+//total_execs,               /* Total execve() calls             */
+slowest_exec_ms,           /* Slowest testcase non hang in ms  */
+start_time,                /* Unix start time (ms)             */
+last_path_time,            /* Time for most recent path (ms)   */
+last_crash_time,           /* Time for most recent crash (ms)  */
+last_hang_time,            /* Time for most recent hang (ms)   */
+last_crash_execs,          /* Exec counter at last crash       */
+queue_cycle,               /* Queue round counter              */
+cycles_wo_finds,           /* Cycles without any new paths     */
+trim_execs,                /* Execs done to trim input files   */
+bytes_trim_in,             /* Bytes coming into the trimmer    */
+bytes_trim_out,            /* Bytes coming outa the trimmer    */
+blocks_eff_total,          /* Blocks subject to effector maps  */
+blocks_eff_select;         /* Blocks selected as fuzzable      */
+
+static u32 rand_cnt;                  /* Random number counter            */
+
+
+struct queue_entry {
+
+    u8 *fname;                          /* File name for the test case      */
+    u32 len;                            /* Input length                     */
+
+    u8 cal_failed,                     /* Calibration failed?              */
+    trim_done,                      /* Trimmed?                         */
+    was_fuzzed,                     /* Had any fuzzing done yet?        */
+    passed_det,                     /* Deterministic stages passed?     */
+    has_new_cov,                    /* Triggers new coverage?           */
+    var_behavior,                   /* Variable behavior?               */
+    favored,                        /* Currently favored?               */
+    fs_redundant;                   /* Marked as redundant in the fs?   */
+
+    u32 bitmap_size,                    /* Number of bits set in bitmap     */
+    exec_cksum;                     /* Checksum of the execution trace  */
+
+    u64 exec_us,                        /* Execution time (us)              */
+    handicap,                       /* Number of queue cycles behind    */
+    depth;                          /* Path depth                       */
+
+    u8 *trace_mini;                     /* Trace bytes, if kept             */
+    u32 tc_ref;                         /* Trace bytes ref count            */
+
+    struct queue_entry *next,           /* Next element, if any             */
+    *next_100;       /* 100 elements ahead               */
+
+    region_t *regions;                  /* Regions keeping information of message(s) sent to the server under test */
+    u32 region_count;                   /* Total number of regions in this seed */
+    u32 index;                          /* Index of this queue entry in the whole queue */
+    u32 generating_state_id;            /* ID of the start at which the new seed was generated */
+    u8 is_initial_seed;                 /* Is this an initial seed */
+    u32 unique_state_count;             /* Unique number of states traversed by this queue entry */
+
+};
+
+static struct queue_entry *queue,     /* Fuzzing queue (linked list)      */
+*queue_cur, /* Current offset within the queue  */
+*queue_top, /* Top of the list                  */
+*q_prev100; /* Previous 100 marker              */
+
+static struct queue_entry *
+        top_rated[MAP_SIZE];                /* Top entries for bitmap bytes     */
+
+
+
+
+/* AFLNet-specific variables & functions */
+
+u32 server_wait_usecs = 10000;
+u32 poll_wait_msecs = 1;
+u32 socket_timeout_usecs = 1000;
+u8 net_protocol;
+u8 *net_ip;
+u32 net_port;
+char *response_buf = NULL;
+int response_buf_size = 0; //the size of the whole response buffer
+u32 *response_bytes = NULL; //an array keeping accumulated response buffer size
+//e.g., response_bytes[i] keeps the response buffer size
+//once messages 0->i have been received and processed by the SUT
+u32 max_annotated_regions = 0;
+u32 target_state_id = 0;
+u32 *state_ids = NULL;
+u32 state_ids_count = 0;
+u32 selected_state_index = 0;
+u32 state_cycles = 0;
+u32 messages_sent = 0;
+static u8 session_virgin_bits[MAP_SIZE];     /* Regions yet untouched while the SUT is still running */
+static u8 *cleanup_script; /* script to clean up the environment of the SUT -- make fuzzing more deterministic */
+static u8 *netns_name; /* network namespace name to run server in */
+char **was_fuzzed_map = NULL; /* A 2D array keeping state-specific was_fuzzed information */
+u32 fuzzed_map_states = 0;
+u32 fuzzed_map_qentries = 0;
+u32 max_seed_region_count = 0;
+u32 local_port;        /* TCP/UDP port number to use as source */
+
+/* flags */
+u8 use_net = 0;
+u8 poll_wait = 0;
+u8 server_wait = 0;
+u8 socket_timeout = 0;
+u8 protocol_selected = 0;
+u8 terminate_child = 0;
+u8 corpus_read_or_sync = 0;
+u8 state_aware_mode = 0;
+u8 region_level_mutation = 0;
+u8 state_selection_algo = ROUND_ROBIN, seed_selection_algo = RANDOM_SELECTION;
+u8 false_negative_reduction = 0;
+
+/* Implemented state machine */
+Agraph_t *ipsm;
+static FILE *ipsm_dot_file;
+
+/* Hash table/map and list */
+klist_t(lms) *kl_messages;
+khash_t(hs32) *khs_ipsm_paths;
+khash_t(hms) *khms_states;
+
+//M2_prev points to the last message of M1 (i.e., prefix)
+//If M1 is empty, M2_prev == NULL
+//M2_next points to the first message of M3 (i.e., suffix)
+//If M3 is empty, M2_next point to the end of the kl_messages linked list
+kliter_t(lms) *M2_prev, *M2_next;
+
+//Function pointers pointing to Protocol-specific functions
+unsigned int *
+(*extract_response_codes)(unsigned char *buf, unsigned int buf_size, unsigned int *state_count_ref) = NULL;
+
+region_t *(*extract_requests)(unsigned char *buf, unsigned int buf_size, unsigned int *region_count_ref) = NULL;
+
+
+//||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+
+
+
 
 /* Most of code is borrowed directly from AFL fuzzer (https://github.com/mirrorer/afl), credits to Michal Zalewski */
 
@@ -148,18 +308,6 @@ int sign[10000];                        /* Array to store sign of critical bytes
 int num_index[14] = {0,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192};
 
 
-/* Network part*/
-/* Network part*/
-/* Network part*/
-
-/* Implemented state machine */
-Agraph_t  *ipsm;
-static FILE* ipsm_dot_file;
-
-/* Hash table/map and list */
-klist_t(lms) *kl_messages;
-khash_t(hs32) *khs_ipsm_paths;
-khash_t(hms) *khms_states;
 
 enum {
     /* 00 */ FAULT_NONE,
@@ -169,6 +317,382 @@ enum {
     /* 04 */ FAULT_NOINST,
     /* 05 */ FAULT_NOBITS
 };
+
+
+//||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+//add function from here
+
+
+/* Get unix time in milliseconds */
+
+static u64 get_cur_time(void) {
+
+    struct timeval tv;
+    struct timezone tz;
+
+    gettimeofday(&tv, &tz);
+
+    return (tv.tv_sec * 1000ULL) + (tv.tv_usec / 1000);
+
+}
+
+
+/* Describe integer as memory size. */
+
+static u8 *DMS(u64 val) {
+
+    static u8 tmp[12][16];
+    static u8 cur;
+
+    cur = (cur + 1) % 12;
+
+    /* 0-9999 */
+    CHK_FORMAT(1, 10000, "%llu B", u64);
+
+    /* 10.0k - 99.9k */
+    CHK_FORMAT(1024, 99.95, "%0.01f kB", double);
+
+    /* 100k - 999k */
+    CHK_FORMAT(1024, 1000, "%llu kB", u64);
+
+    /* 1.00M - 9.99M */
+    CHK_FORMAT(1024 * 1024, 9.995, "%0.02f MB", double);
+
+    /* 10.0M - 99.9M */
+    CHK_FORMAT(1024 * 1024, 99.95, "%0.01f MB", double);
+
+    /* 100M - 999M */
+    CHK_FORMAT(1024 * 1024, 1000, "%llu MB", u64);
+
+    /* 1.00G - 9.99G */
+    CHK_FORMAT(1024LL * 1024 * 1024, 9.995, "%0.02f GB", double);
+
+    /* 10.0G - 99.9G */
+    CHK_FORMAT(1024LL * 1024 * 1024, 99.95, "%0.01f GB", double);
+
+    /* 100G - 999G */
+    CHK_FORMAT(1024LL * 1024 * 1024, 1000, "%llu GB", u64);
+
+    /* 1.00T - 9.99G */
+    CHK_FORMAT(1024LL * 1024 * 1024 * 1024, 9.995, "%0.02f TB", double);
+
+    /* 10.0T - 99.9T */
+    CHK_FORMAT(1024LL * 1024 * 1024 * 1024, 99.95, "%0.01f TB", double);
+
+#undef CHK_FORMAT
+
+    /* 100T+ */
+    strcpy(tmp[cur], "infty");
+    return tmp[cur];
+
+}
+
+/* Generate a random number (from 0 to limit - 1). This may
+   have slight bias. */
+
+static inline u32 UR(u32 limit) {
+
+    if (unlikely(!rand_cnt--)) {
+
+        u32 seed[2];
+
+        ck_read(dev_urandom_fd, &seed, sizeof(seed), "/dev/urandom");
+
+        srandom(seed[0]);
+        rand_cnt = (RESEED_RNG / 2) + (seed[1] % RESEED_RNG);
+
+    }
+
+    return random() % limit;
+
+}
+
+/* Shuffle an array of pointers. Might be slightly biased. */
+
+static void shuffle_ptrs(void **ptrs, u32 cnt) {
+
+    u32 i;
+
+    for (i = 0; i < cnt - 2; i++) {
+
+        u32 j = i + UR(cnt - i);
+        void *s = ptrs[i];
+        ptrs[i] = ptrs[j];
+        ptrs[j] = s;
+
+    }
+
+}
+
+/* Initialize the implemented state machine as a graphviz graph */
+void setup_ipsm()
+{
+    ipsm = agopen("g", Agdirected, 0);
+
+    agattr(ipsm, AGNODE, "color", "black"); //Default node colr is black
+    agattr(ipsm, AGEDGE, "color", "black"); //Default edge color is black
+
+    khs_ipsm_paths = kh_init(hs32);
+
+    khms_states = kh_init(hms);
+}
+
+/* Free memory allocated to state-machine variables */
+void destroy_ipsm()
+{
+    agclose(ipsm);
+
+    kh_destroy(hs32, khs_ipsm_paths);
+
+    state_info_t *state;
+    kh_foreach_value(khms_states, state, {ck_free(state->seeds); ck_free(state);});
+    kh_destroy(hms, khms_states);
+
+    ck_free(state_ids);
+}
+
+/* Expand the size of the map when a new seed or a new state has been discovered */
+void expand_was_fuzzed_map(u32 new_states, u32 new_qentries) {
+    int i, j;
+    //Realloc the memory
+    was_fuzzed_map = (char **) ck_realloc(was_fuzzed_map, (fuzzed_map_states + new_states) * sizeof(char *));
+    for (i = 0; i < fuzzed_map_states + new_states; i++)
+        was_fuzzed_map[i] = (char *) ck_realloc(was_fuzzed_map[i], (fuzzed_map_qentries + new_qentries) * sizeof(char));
+
+    //All new cells are marked as -1 -- meaning UNREACHABLE
+    //Keep other cells untouched
+    for (i = 0; i < fuzzed_map_states + new_states; i++)
+        for (j = 0; j < fuzzed_map_qentries + new_qentries; j++)
+            if ((i >= fuzzed_map_states) || (j >= fuzzed_map_qentries)) was_fuzzed_map[i][j] = -1;
+
+    //Update total number of states (rows) and total number of queue entries (columns) in the was_fuzzed_map
+    fuzzed_map_states += new_states;
+    fuzzed_map_qentries += new_qentries;
+}
+
+/* Append new test case to the queue. */
+
+static void add_to_queue(u8 *fname, u32 len, u8 passed_det) {
+
+    struct queue_entry *q = ck_alloc(sizeof(struct queue_entry));
+
+    q->fname = fname;
+    q->len = len;
+    q->depth = cur_depth + 1;
+    q->passed_det = passed_det;
+    q->regions = NULL;
+    q->region_count = 0;
+    q->index = queued_paths;
+    q->generating_state_id = target_state_id;
+    q->is_initial_seed = 0;
+    q->unique_state_count = 0;
+
+    if (q->depth > max_depth) max_depth = q->depth;
+
+    if (queue_top) {
+
+        queue_top->next = q;
+        queue_top = q;
+
+    } else q_prev100 = queue = queue_top = q;
+
+    queued_paths++;
+    pending_not_fuzzed++;
+
+    cycles_wo_finds = 0;
+
+    if (!(queued_paths % 100)) {
+
+        q_prev100->next_100 = q;
+        q_prev100 = q;
+
+    }
+
+    /* AFLNet: extract regions keeping client requests if needed */
+    if (corpus_read_or_sync) {
+        FILE *fp;
+        unsigned char *buf;
+
+        /* opening file for reading */
+        fp = fopen(fname, "rb");
+
+        buf = (unsigned char *) ck_alloc(len);
+        u32 byte_count = fread(buf, 1, len, fp);
+        fclose(fp);
+
+        if (byte_count != len) PFATAL("AFLNet - Inconsistent file length '%s'", fname);
+        q->regions = (*extract_requests)(buf, len, &q->region_count);
+        ck_free(buf);
+
+        //Keep track the maximal number of seed regions
+        //We use this for some optimization to reduce the overhead while following the server's sequence diagram
+        if ((corpus_read_or_sync == 1) && (q->region_count > max_seed_region_count))
+            max_seed_region_count = q->region_count;
+
+    } else {
+        //Convert the linked list kl_messages to regions
+        q->regions = convert_kl_messages_to_regions(kl_messages, &q->region_count, messages_sent);
+    }
+
+    /* save the regions' information to file for debugging purpose */
+    u8 *fn = alloc_printf("%s/regions/%s", out_dir, basename(fname));
+    save_regions_to_file(q->regions, q->region_count, fn);
+    ck_free(fn);
+
+    last_path_time = get_cur_time();
+
+    //Add a new column to the was_fuzzed map
+    if (fuzzed_map_states) {
+        expand_was_fuzzed_map(0, 1);
+    } else {
+        //Also add a new row (for state 0) if needed
+        expand_was_fuzzed_map(1, 1);
+    }
+}
+
+
+/* Destroy the entire queue. */
+
+static void destroy_queue(void) {
+
+    struct queue_entry *q = queue, *n;
+
+    while (q) {
+
+        n = q->next;
+        ck_free(q->fname);
+        ck_free(q->trace_mini);
+        u32 i;
+        //Free AFLNet-specific data structure
+        for (i = 0; i < q->region_count; i++) {
+            if (q->regions[i].state_sequence) ck_free(q->regions[i].state_sequence);
+        }
+        if (q->regions) ck_free(q->regions);
+        ck_free(q);
+        q = n;
+
+    }
+
+}
+
+
+
+/* Read all testcases from the input directory, then queue them for testing.
+   Called at startup. */
+
+static void read_testcases(void) {
+
+    struct dirent **nl;
+    s32 nl_cnt;
+    u32 i;
+    u8 *fn;
+
+    /* AFLNet: set this flag to enable request extractions while adding new seed to the queue */
+    corpus_read_or_sync = 1;
+
+    /* Auto-detect non-in-place resumption attempts. */
+
+    fn = alloc_printf("%s/queue", in_dir);
+    if (!access(fn, F_OK)) in_dir = fn; else ck_free(fn);
+
+    ACTF("Scanning '%s'...", in_dir);
+
+    /* We use scandir() + alphasort() rather than readdir() because otherwise,
+     the ordering  of test cases would vary somewhat randomly and would be
+     difficult to control. */
+
+    nl_cnt = scandir(in_dir, &nl, NULL, alphasort);
+
+    if (nl_cnt < 0) {
+
+        if (errno == ENOENT || errno == ENOTDIR)
+
+            SAYF("\n" cLRD "[-] " cRST
+                         "The input directory does not seem to be valid - try again. The fuzzer needs\n"
+                         "    one or more test case to start with - ideally, a small file under 1 kB\n"
+                         "    or so. The cases must be stored as regular files directly in the input\n"
+                         "    directory.\n");
+
+        PFATAL("Unable to open '%s'", in_dir);
+
+    }
+
+    if (shuffle_queue && nl_cnt > 1) {
+
+        ACTF("Shuffling queue...");
+        shuffle_ptrs((void **) nl, nl_cnt);
+
+    }
+
+    for (i = 0; i < nl_cnt; i++) {
+
+        struct stat st;
+
+        u8 *fn = alloc_printf("%s/%s", in_dir, nl[i]->d_name);
+        u8 *dfn = alloc_printf("%s/.state/deterministic_done/%s", in_dir, nl[i]->d_name);
+
+        u8 passed_det = 0;
+
+        free(nl[i]); /* not tracked */
+
+        if (lstat(fn, &st) || access(fn, R_OK))
+            PFATAL("Unable to access '%s'", fn);
+
+        /* This also takes care of . and .. */
+
+        if (!S_ISREG(st.st_mode) || !st.st_size || strstr(fn, "/README.txt")) {
+
+            ck_free(fn);
+            ck_free(dfn);
+            continue;
+
+        }
+
+        if (st.st_size > MAX_FILE)
+            FATAL("Test case '%s' is too big (%s, limit is %s)", fn,
+                  DMS(st.st_size), DMS(MAX_FILE));
+
+        /* Check for metadata that indicates that deterministic fuzzing
+       is complete for this entry. We don't want to repeat deterministic
+       fuzzing when resuming aborted scans, because it would be pointless
+       and probably very time-consuming. */
+
+        if (!access(dfn, F_OK)) passed_det = 1;
+        ck_free(dfn);
+
+        add_to_queue(fn, st.st_size, passed_det);
+
+    }
+
+    /* AFLNet: unset this flag to disable request extractions while adding new seed to the queue */
+    corpus_read_or_sync = 0;
+
+    free(nl); /* not tracked */
+
+    if (!queued_paths) {
+
+        SAYF("\n" cLRD "[-] " cRST
+                     "Looks like there are no valid test cases in the input directory! The fuzzer\n"
+                     "    needs one or more test case to start with - ideally, a small file under\n"
+                     "    1 kB or so. The cases must be stored as regular files directly in the\n"
+                     "    input directory.\n");
+
+        FATAL("No usable test cases in '%s'", in_dir);
+
+    }
+
+    last_path_time = 0;
+    queued_at_start = queued_paths;
+
+}
+
+//||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+//||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
 
 /* Spin up fork server (instrumented mode only). The idea is explained here:
    http://lcamtuf.blogspot.com/2014/10/fuzzing-binaries-without-execve.html
@@ -516,6 +1040,7 @@ void init_forkserver(char** argv) {
     perror("Fork server handshake failed");
 
 }
+
 
 /* Get rid of shared memory (atexit handler). */
 
@@ -2096,33 +2621,6 @@ void start_fuzz_test(int f_len){
     fuzz_lop("gradient_info", sock);
     return;
 }
-/* Initialize the implemented state machine as a graphviz graph */
-/* Initialize the implemented state machine as a graphviz graph */
-void setup_ipsm()
-{
-    ipsm = agopen("g", Agdirected, 0);
-
-    agattr(ipsm, AGNODE, "color", "black"); //Default node colr is black
-    agattr(ipsm, AGEDGE, "color", "black"); //Default edge color is black
-
-    khs_ipsm_paths = kh_init(hs32);
-
-    khms_states = kh_init(hms);
-}
-
-/* Free memory allocated to state-machine variables */
-void destroy_ipsm()
-{
-    agclose(ipsm);
-
-    kh_destroy(hs32, khs_ipsm_paths);
-
-    state_info_t *state;
-    kh_foreach_value(khms_states, state, {ck_free(state->seeds); ck_free(state);});
-    kh_destroy(hms, khms_states);
-
-    ck_free(state_ids);
-}
 
 void main(int argc, char*argv[]){
     int opt;
@@ -2176,6 +2674,8 @@ void main(int argc, char*argv[]){
     //todo 1
     setup_ipsm();
     setup_dirs_fds();
+    //todo
+    read_testcases();
     if (!out_file) setup_stdio_file();
     detect_file_args(argv + optind + 1);
     setup_targetpath(argv[optind]);

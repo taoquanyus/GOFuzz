@@ -1,3 +1,6 @@
+# 3.31a
+copy_seeds 和 pivot_testcases作用相当，先暂时不理会效率问题，当前先把功能完成
+
 # 3.26a
 添加了队列机制（暂时未完全完成，read_testcases还需要调试和理解）
 

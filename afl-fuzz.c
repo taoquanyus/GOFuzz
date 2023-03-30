@@ -2335,6 +2335,7 @@ void dry_run(char* dir, int stage){
         perror("chdir failed\n");
     int cnt = 0;
     u64 start_us, stop_us;
+
     while((entry = readdir(dp)) != NULL) {
         if(stat(entry->d_name,&statbuf) == -1)
             continue;
@@ -2681,8 +2682,9 @@ void main(int argc, char*argv[]){
     setup_targetpath(argv[optind]);
 
     copy_seeds(in_dir, out_dir);
-    //todo 3
     init_forkserver(argv+optind);
+
+
 
     start_fuzz(len);
     //todo 2

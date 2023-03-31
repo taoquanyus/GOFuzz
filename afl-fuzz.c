@@ -163,7 +163,7 @@ u8 socket_timeout = 0;
 u8 protocol_selected = 0;
 u8 terminate_child = 0;
 u8 corpus_read_or_sync = 0;
-u8 state_aware_mode = 0;
+u8 state_aware_mode = 1; //直接把它设置为1
 u8 region_level_mutation = 0;
 u8 state_selection_algo = ROUND_ROBIN, seed_selection_algo = RANDOM_SELECTION;
 u8 false_negative_reduction = 0;
@@ -686,6 +686,378 @@ static void read_testcases(void) {
 
     last_path_time = 0;
     queued_at_start = queued_paths;
+
+}
+static u64 get_cur_time_us(void);
+/* Calibrate a new test case. This is done when processing the input directory
+   to warn about flaky or otherwise problematic test cases early on; and when
+   new paths are discovered to detect variable behavior and so on. */
+
+static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
+                         u32 handicap, u8 from_queue) {
+
+    static u8 first_trace[MAP_SIZE];
+
+    u8 fault = 0, new_bits = 0, var_detected = 0,
+            first_run = (q->exec_cksum == 0);
+
+    u64 start_us, stop_us;
+
+    s32 old_sc = stage_cur, old_sm = stage_max;
+    u32 use_tmout = exec_tmout;
+    u8 *old_sn = stage_name;
+
+    /* Be a bit more generous about timeouts when resuming sessions, or when
+     trying to calibrate already-added finds. This helps avoid trouble due
+     to intermittent latency. */
+
+    if (!from_queue || resuming_fuzz)
+        use_tmout = MAX(exec_tmout + CAL_TMOUT_ADD,
+                        exec_tmout * CAL_TMOUT_PERC / 100);
+
+    q->cal_failed++;
+
+    stage_name = "calibration";
+    stage_max = fast_cal ? 3 : CAL_CYCLES;
+
+    /* Make sure the forkserver is up before we do anything, and let's not
+     count its spin-up time toward binary calibration. */
+
+    if (dumb_mode != 1 && !no_forkserver && !forksrv_pid)
+        init_forkserver(argv);
+
+    if (q->exec_cksum) memcpy(first_trace, trace_bits, MAP_SIZE);
+
+    start_us = get_cur_time_us();
+
+    for (stage_cur = 0; stage_cur < stage_max; stage_cur++) {
+
+        u32 cksum;
+
+        if (!first_run && !(stage_cur % stats_update_freq)) show_stats();
+
+        write_to_testcase(use_mem, q->len);
+
+        fault = run_target(argv, use_tmout);
+
+        /* stop_soon is set by the handler for Ctrl+C. When it's pressed,
+       we want to bail out quickly. */
+
+        if (stop_soon || fault != crash_mode) goto abort_calibration;
+
+        if (!dumb_mode && !stage_cur && !count_bytes(trace_bits)) {
+            fault = FAULT_NOINST;
+            goto abort_calibration;
+        }
+
+        cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
+
+        if (q->exec_cksum != cksum) {
+
+            u8 hnb = has_new_bits(virgin_bits);
+            if (hnb > new_bits) new_bits = hnb;
+
+            if (q->exec_cksum) {
+
+                u32 i;
+
+                for (i = 0; i < MAP_SIZE; i++) {
+
+                    if (!var_bytes[i] && first_trace[i] != trace_bits[i]) {
+
+                        var_bytes[i] = 1;
+                        stage_max = CAL_CYCLES_LONG;
+
+                    }
+
+                }
+
+                var_detected = 1;
+
+            } else {
+
+                q->exec_cksum = cksum;
+                memcpy(first_trace, trace_bits, MAP_SIZE);
+
+            }
+
+        }
+
+    }
+
+    stop_us = get_cur_time_us();
+
+    total_cal_us += stop_us - start_us;
+    total_cal_cycles += stage_max;
+
+    /* OK, let's collect some stats about the performance of this test case.
+     This is used for fuzzing air time calculations in calculate_score(). */
+
+    q->exec_us = (stop_us - start_us) / stage_max;
+    q->bitmap_size = count_bytes(trace_bits);
+    q->handicap = handicap;
+    q->cal_failed = 0;
+
+    total_bitmap_size += q->bitmap_size;
+    total_bitmap_entries++;
+
+    update_bitmap_score(q);
+
+    /* If this case didn't result in new output from the instrumentation, tell
+     parent. This is a non-critical problem, but something to warn the user
+     about. */
+
+    if (!dumb_mode && first_run && !fault && !new_bits) fault = FAULT_NOBITS;
+
+    abort_calibration:
+
+    if (new_bits == 2 && !q->has_new_cov) {
+        q->has_new_cov = 1;
+        queued_with_cov++;
+    }
+
+    /* Mark variable paths. */
+
+    if (var_detected) {
+
+        var_byte_count = count_bytes(var_bytes);
+
+        if (!q->var_behavior) {
+            mark_as_variable(q);
+            queued_variable++;
+        }
+
+    }
+
+    stage_name = old_sn;
+    stage_cur = old_sc;
+    stage_max = old_sm;
+
+    if (!first_run) show_stats();
+
+    return fault;
+
+}
+
+
+
+/* Perform dry run of all test cases to confirm that the app is working as
+   expected. This is done only for the initial inputs, and only once. */
+
+static void perform_dry_run(char **argv) {
+
+    struct queue_entry *q = queue;
+    u32 cal_failures = 0;
+    u8 *skip_crashes = getenv("AFL_SKIP_CRASHES");
+
+    while (q) {
+
+        u8 *use_mem;
+        u8 res;
+        s32 fd;
+
+        q->is_initial_seed = 1;
+
+        u8 *fn = strrchr(q->fname, '/') + 1;
+
+        ACTF("Attempting dry run with '%s'...", fn);
+
+        fd = open(q->fname, O_RDONLY);
+        if (fd < 0) PFATAL("Unable to open '%s'", q->fname);
+
+        use_mem = ck_alloc_nozero(q->len);
+
+        if (read(fd, use_mem, q->len) != q->len)
+            FATAL("Short read from '%s'", q->fname);
+
+        close(fd);
+
+        /* AFLNet construct the kl_messages linked list for this queue entry*/
+        kl_messages = construct_kl_messages(q->fname, q->regions, q->region_count);
+
+        res = calibrate_case(argv, q, use_mem, 0, 1);
+        ck_free(use_mem);
+
+        /* Update state-aware variables (e.g., state machine, regions and their annotations */
+        if (state_aware_mode) update_state_aware_variables(q, 1);
+
+        /* save the seed to file for replaying */
+        u8 *fn_replay = alloc_printf("%s/replayable-queue/%s", out_dir, basename(q->fname));
+        save_kl_messages_to_file(kl_messages, fn_replay, 1, messages_sent);
+        ck_free(fn_replay);
+
+        /* AFLNet delete the kl_messages */
+        delete_kl_messages(kl_messages);
+
+        if (stop_soon) return;
+
+        if (res == crash_mode || res == FAULT_NOBITS)
+            SAYF(cGRA "    len = %u, map size = %u, exec speed = %llu us\n" cRST,
+                 q->len, q->bitmap_size, q->exec_us);
+
+        switch (res) {
+
+            case FAULT_NONE:
+
+                if (q == queue) check_map_coverage();
+
+                if (crash_mode) FATAL("Test case '%s' does *NOT* crash", fn);
+
+                break;
+
+            case FAULT_TMOUT:
+
+                if (timeout_given) {
+
+                    /* The -t nn+ syntax in the command line sets timeout_given to '2' and
+             instructs afl-fuzz to tolerate but skip queue entries that time
+             out. */
+
+                    if (timeout_given > 1) {
+                        WARNF("Test case results in a timeout (skipping)");
+                        q->cal_failed = CAL_CHANCES;
+                        cal_failures++;
+                        break;
+                    }
+
+                    SAYF("\n" cLRD "[-] " cRST
+                                 "The program took more than %u ms to process one of the initial test cases.\n"
+                                 "    Usually, the right thing to do is to relax the -t option - or to delete it\n"
+                                 "    altogether and allow the fuzzer to auto-calibrate. That said, if you know\n"
+                                 "    what you are doing and want to simply skip the unruly test cases, append\n"
+                                 "    '+' at the end of the value passed to -t ('-t %u+').\n", exec_tmout,
+                         exec_tmout);
+
+                    FATAL("Test case '%s' results in a timeout", fn);
+
+                } else {
+
+                    SAYF("\n" cLRD "[-] " cRST
+                                 "The program took more than %u ms to process one of the initial test cases.\n"
+                                 "    This is bad news; raising the limit with the -t option is possible, but\n"
+                                 "    will probably make the fuzzing process extremely slow.\n\n"
+
+                                 "    If this test case is just a fluke, the other option is to just avoid it\n"
+                                 "    altogether, and find one that is less of a CPU hog.\n", exec_tmout);
+
+                    FATAL("Test case '%s' results in a timeout", fn);
+
+                }
+
+            case FAULT_CRASH:
+
+                if (crash_mode) break;
+
+                if (skip_crashes) {
+                    WARNF("Test case results in a crash (skipping)");
+                    q->cal_failed = CAL_CHANCES;
+                    cal_failures++;
+                    break;
+                }
+
+                if (mem_limit) {
+
+                    SAYF("\n" cLRD "[-] " cRST
+                                 "Oops, the program crashed with one of the test cases provided. There are\n"
+                                 "    several possible explanations:\n\n"
+
+                                 "    - The test case causes known crashes under normal working conditions. If\n"
+                                 "      so, please remove it. The fuzzer should be seeded with interesting\n"
+                                 "      inputs - but not ones that cause an outright crash.\n\n"
+
+                                 "    - The current memory limit (%s) is too low for this program, causing\n"
+                                 "      it to die due to OOM when parsing valid files. To fix this, try\n"
+                                 "      bumping it up with the -m setting in the command line. If in doubt,\n"
+                                 "      try something along the lines of:\n\n"
+
+#ifdef RLIMIT_AS
+                                 "      ( ulimit -Sv $[%llu << 10]; /path/to/binary [...] <testcase )\n\n"
+#else
+                                 "      ( ulimit -Sd $[%llu << 10]; /path/to/binary [...] <testcase )\n\n"
+#endif /* ^RLIMIT_AS */
+
+                                 "      Tip: you can use http://jwilk.net/software/recidivm to quickly\n"
+                                 "      estimate the required amount of virtual memory for the binary. Also,\n"
+                                 "      if you are using ASAN, see %s/notes_for_asan.txt.\n\n"
+
+#ifdef __APPLE__
+
+                                 "    - On MacOS X, the semantics of fork() syscalls are non-standard and may\n"
+                                 "      break afl-fuzz performance optimizations when running platform-specific\n"
+                                 "      binaries. To fix this, set AFL_NO_FORKSRV=1 in the environment.\n\n"
+
+#endif /* __APPLE__ */
+
+                                 "    - Least likely, there is a horrible bug in the fuzzer. If other options\n"
+                                 "      fail, poke <lcamtuf@coredump.cx> for troubleshooting tips.\n",
+                         DMS(mem_limit << 20), mem_limit - 1, doc_path);
+
+                } else {
+
+                    SAYF("\n" cLRD "[-] " cRST
+                                 "Oops, the program crashed with one of the test cases provided. There are\n"
+                                 "    several possible explanations:\n\n"
+
+                                 "    - The test case causes known crashes under normal working conditions. If\n"
+                                 "      so, please remove it. The fuzzer should be seeded with interesting\n"
+                                 "      inputs - but not ones that cause an outright crash.\n\n"
+
+#ifdef __APPLE__
+
+                                 "    - On MacOS X, the semantics of fork() syscalls are non-standard and may\n"
+                                 "      break afl-fuzz performance optimizations when running platform-specific\n"
+                                 "      binaries. To fix this, set AFL_NO_FORKSRV=1 in the environment.\n\n"
+
+#endif /* __APPLE__ */
+
+                                 "    - Least likely, there is a horrible bug in the fuzzer. If other options\n"
+                                 "      fail, poke <lcamtuf@coredump.cx> for troubleshooting tips.\n");
+
+                }
+
+                FATAL("Test case '%s' results in a crash", fn);
+
+            case FAULT_ERROR:
+
+                FATAL("Unable to execute target application ('%s')", argv[0]);
+
+            case FAULT_NOINST:
+
+                FATAL("No instrumentation detected");
+
+            case FAULT_NOBITS:
+
+                useless_at_start++;
+
+                if (!in_bitmap && !shuffle_queue)
+                    WARNF("No new instrumentation output, test case may be useless.");
+
+                break;
+
+        }
+
+        if (q->var_behavior) WARNF("Instrumentation output varies across runs.");
+
+        q = q->next;
+
+    }
+
+    if (cal_failures) {
+
+        if (cal_failures == queued_paths)
+            FATAL("All test cases time out%s, giving up!",
+                  skip_crashes ? " or crash" : "");
+
+        WARNF("Skipped %u test cases (%0.02f%%) due to timeouts%s.", cal_failures,
+              ((double) cal_failures) * 100 / queued_paths,
+              skip_crashes ? " or crashes" : "");
+
+        if (cal_failures * 5 > queued_paths)
+            WARNF(cLRD "High percentage of rejected test cases, check settings!");
+
+    }
+
+    OKF("All test cases processed.");
 
 }
 
@@ -2683,7 +3055,7 @@ void main(int argc, char*argv[]){
 
     copy_seeds(in_dir, out_dir);
     init_forkserver(argv+optind);
-
+    perform_dry_run(use_argv);
 
 
     start_fuzz(len);

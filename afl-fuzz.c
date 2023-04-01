@@ -1137,6 +1137,7 @@ static void handle_stop_sig(int sig) {
    Updates the map, so subsequent calls will always return 0.
    This function is called after every exec() on a fairly large buffer, so
    it needs to be fast. We do this in 32-bit and 64-bit flavors. */
+//检查当前执行路径是否为表带来了新内容。更新原始位以反映发现。如果唯一更改的是特定元组的命中计数，则返回1;如果有新的元组出现，则返回2。更新映射，因此后续调用将始终返回0。static
 
 static inline char has_new_bits(char* virgin_map) {
 
@@ -1974,6 +1975,7 @@ static u8 run_target(int timeout) {
    truncated. */
 
 static void write_to_testcase(void* mem, u32 len) {
+    // 理论上来说这个可以舍弃了
 
     int fd = out_fd;
 
@@ -2725,6 +2727,7 @@ void dry_run(char* dir, int stage){
                 start_us = get_cur_time_us();
                 write_to_testcase(out_buf1, file_len);
                 int fault = run_target(exec_tmout);
+
                 if (fault != 0){
                     if(fault == FAULT_CRASH){
                         char* mut_fn = alloc_printf("%s/crash_%d_%06d", "./crashes",round_cnt, mut_cnt);
@@ -3055,7 +3058,7 @@ void main(int argc, char*argv[]){
 
     copy_seeds(in_dir, out_dir);
     init_forkserver(argv+optind);
-    perform_dry_run(use_argv);
+//    perform_dry_run(use_argv);
 
 
     start_fuzz(len);

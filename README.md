@@ -1,3 +1,8 @@
+#4.01a
+明确了修改思路
+下一步修改dry_run 和对应的run_target即可完成
+还有对应的gen_mutation
+
 # 3.31a
 copy_seeds 和 pivot_testcases作用相当，先暂时不理会效率问题，当前先把功能完成
 

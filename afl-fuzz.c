@@ -156,7 +156,7 @@ u32 max_seed_region_count = 0;
 u32 local_port;        /* TCP/UDP port number to use as source */
 
 /* flags */
-u8 use_net = 0;
+u8 use_net = 1;
 u8 poll_wait = 0;
 u8 server_wait = 0;
 u8 socket_timeout = 0;
@@ -689,6 +689,148 @@ static void read_testcases(void) {
 
 }
 static u64 get_cur_time_us(void);
+static inline char has_new_bits(char* virgin_map);
+
+/* Send (mutated) messages in order to the server under test */
+int send_over_network() {
+    int n;
+    u8 likely_buggy = 0;
+    struct sockaddr_in serv_addr;
+    struct sockaddr_in local_serv_addr;
+
+    //Clean up the server if needed
+    if (cleanup_script) system(cleanup_script);
+
+    //Wait a bit for the server initialization
+    usleep(server_wait_usecs);
+
+    //Clear the response buffer and reset the response buffer size
+    if (response_buf) {
+        ck_free(response_buf);
+        response_buf = NULL;
+        response_buf_size = 0;
+    }
+
+    if (response_bytes) {
+        ck_free(response_bytes);
+        response_bytes = NULL;
+    }
+
+    //Create a TCP/UDP socket
+    int sockfd = -1;
+    if (net_protocol == PRO_TCP)
+        sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    else if (net_protocol == PRO_UDP)
+        sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+    if (sockfd < 0) {
+        PFATAL("Cannot create a socket");
+    }
+
+    //Set timeout for socket data sending/receiving -- otherwise it causes a big delay
+    //if the server is still alive after processing all the requests
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = socket_timeout_usecs;
+    setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (char *) &timeout, sizeof(timeout));
+
+    memset(&serv_addr, '0', sizeof(serv_addr));
+
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(net_port);
+    serv_addr.sin_addr.s_addr = inet_addr(net_ip);
+
+    //This piece of code is only used for targets that send responses to a specific port number
+    //The Kamailio SIP server is an example. After running this code, the intialized sockfd
+    //will be bound to the given local port
+    if (local_port > 0) {
+        local_serv_addr.sin_family = AF_INET;
+        local_serv_addr.sin_addr.s_addr = INADDR_ANY;
+        local_serv_addr.sin_port = htons(local_port);
+
+        local_serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        if (bind(sockfd, (struct sockaddr *) &local_serv_addr, sizeof(struct sockaddr_in))) {
+            FATAL("Unable to bind socket on local source port");
+        }
+    }
+
+    if (connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
+        //If it cannot connect to the server under test
+        //try it again as the server initial startup time is varied
+        for (n = 0; n < 1000; n++) {
+            if (connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) == 0) break;
+            usleep(1000);
+        }
+        if (n == 1000) {
+            close(sockfd);
+            return 1;
+        }
+    }
+
+    //retrieve early server response if needed
+    if (net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size)) goto HANDLE_RESPONSES;
+
+    //write the request messages
+    kliter_t(lms) *it;
+    messages_sent = 0;
+
+    for (it = kl_begin(kl_messages); it != kl_end(kl_messages); it = kl_next(it)) {
+        n = net_send(sockfd, timeout, kl_val(it)->mdata, kl_val(it)->msize);
+        messages_sent++;
+
+        //Allocate memory to store new accumulated response buffer size
+        response_bytes = (u32 *) ck_realloc(response_bytes, messages_sent * sizeof(u32));
+
+        //Jump out if something wrong leading to incomplete message sent
+        if (n != kl_val(it)->msize) {
+            goto HANDLE_RESPONSES;
+        }
+
+        //retrieve server response
+        u32 prev_buf_size = response_buf_size;
+        if (net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size)) {
+            goto HANDLE_RESPONSES;
+        }
+
+        //Update accumulated response buffer size
+        response_bytes[messages_sent - 1] = response_buf_size;
+
+        //set likely_buggy flag if AFLNet does not receive any feedback from the server
+        //it could be a signal of a potentiall server crash, like the case of CVE-2019-7314
+        if (prev_buf_size == response_buf_size) likely_buggy = 1;
+        else likely_buggy = 0;
+    }
+
+    HANDLE_RESPONSES:
+
+    net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size);
+
+    if (messages_sent > 0 && response_bytes != NULL) {
+        response_bytes[messages_sent - 1] = response_buf_size;
+    }
+
+    //wait a bit letting the server complete its remaining task(s)
+    memset(session_virgin_bits, 255, MAP_SIZE);
+    while (1) {
+        int hnb = has_new_bits(session_virgin_bits);
+        if (hnb != 2) break;
+    }
+
+    close(sockfd);
+
+    if (likely_buggy && false_negative_reduction) return 0;
+
+    if (terminate_child && (child_pid > 0)) kill(child_pid, SIGTERM);
+
+    //give the server a bit more time to gracefully terminate
+    while (1) {
+        int status = kill(child_pid, 0);
+        if ((status != 0) && (errno == ESRCH)) break;
+    }
+
+    return 0;
+}
+
 /* Calibrate a new test case. This is done when processing the input directory
    to warn about flaky or otherwise problematic test cases early on; and when
    new paths are discovered to detect variable behavior and so on. */
@@ -1921,6 +2063,8 @@ static u8 run_target(int timeout) {
 
     /* The SIGALRM handler simply kills the child_pid and sets child_timed_out. */
 
+    //for network
+    if (use_net) send_over_network();
 
 
     if ((res = read(fsrv_st_fd, &status, 4)) != 4) {
@@ -2696,7 +2840,8 @@ void gen_mutate_slow(){
 }
 
 /* dry run the seeds at dir, when stage == 1, save interesting seeds to out_dir; when stage == 2, compute the average exec time */
-//todo 把aflnet的queue添加到此处
+//todo 3.11把aflnet的queue添加到此处
+//todo 3.12修改run_target部分代码  #finish
 void dry_run(char* dir, int stage){
     DIR *dp;
     struct dirent *entry;
@@ -2958,6 +3103,7 @@ void start_fuzz(int f_len){
 
     len = f_len;
     /* dry run seeds*/
+    // todo 3.1
     dry_run(out_dir, 2);
 
     /* start fuzz */
@@ -2965,6 +3111,7 @@ void start_fuzz(int f_len){
     while(1){
         if(read(sock , buf, 5)== -1)
             perror("received failed\n");
+        // todo 3.2
         fuzz_lop("gradient_info", sock);
         printf("receive\n");
     }
@@ -3047,10 +3194,10 @@ void main(int argc, char*argv[]){
     bind_to_free_cpu();
     setup_shm();
     init_count_class16();
-    //todo 1
+    //todo 1 建立ipsm
     setup_ipsm();
     setup_dirs_fds();
-    //todo
+    //todo 2 读取种子
     read_testcases();
     if (!out_file) setup_stdio_file();
     detect_file_args(argv + optind + 1);
@@ -3060,9 +3207,9 @@ void main(int argc, char*argv[]){
     init_forkserver(argv+optind);
 //    perform_dry_run(use_argv);
 
-
+    //todo 3 修改核心代码
     start_fuzz(len);
-    //todo 2
+    //todo 4 删除ipsm
     destroy_ipsm();
     printf("total execs %ld edge coverage %d.\n", total_execs, count_non_255_bytes(virgin_bits));
     return;

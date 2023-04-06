@@ -77,7 +77,7 @@
     "WebServerToolWindowFactoryState": "false",
     "cf.first.check.clang-format": "false",
     "cidr.known.project.marker": "true",
-    "last_opened_file_path": "/home/quanyu/Desktop/neuzz",
+    "last_opened_file_path": "/home/quanyu/Desktop/aflnet",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
@@ -109,6 +109,7 @@
       <workItem from="1680558216600" duration="693000" />
       <workItem from="1680645376748" duration="2615000" />
       <workItem from="1680724486625" duration="1407000" />
+      <workItem from="1680749598163" duration="1347000" />
     </task>
     <servers />
   </component>

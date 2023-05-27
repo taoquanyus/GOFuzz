@@ -24,10 +24,11 @@ MISC_PATH   = $(PREFIX)/share/afl
 
 # PROGS intentionally omit afl-as, which gets installed elsewhere.
 
-PROGS       = afl-gcc afl-fuzz afl-replay aflnet-replay afl-showmap afl-tmin afl-gotcpu afl-analyze
+PROGS       = afl-gcc afl-fuzz afl-replay aflnet-replay afl-showmap gonet-showmap afl-tmin afl-gotcpu afl-analyze
 SH_PROGS    = afl-plot afl-cmin afl-whatsup
 
-CFLAGS     ?= -Wall -D_FORTIFY_SOURCE=2 -g -Wno-pointer-sign -Wno-unused-result \
+CFLAGS     ?= -O0 -funroll-loops
+CFLAGS     += -Wall -D_FORTIFY_SOURCE=2 -g -Wno-pointer-sign -Wno-unused-result \
 	      -DAFL_PATH=\"$(HELPER_PATH)\" -DDOC_PATH=\"$(DOC_PATH)\" \
 	      -DBIN_PATH=\"$(BIN_PATH)\"
 
@@ -79,6 +80,9 @@ aflnet-replay: aflnet-replay.c $(COMM_HDR) aflnet.o aflnet.h | test_x86
 
 afl-showmap: afl-showmap.c $(COMM_HDR) | test_x86
 	$(CC) $(CFLAGS) $@.c -o $@ $(LDFLAGS)
+
+gonet-showmap: gonet-showmap.c $(COMM_HDR) aflnet.o aflnet.h | test_x86
+	$(CC) $(CFLAGS) $@.c aflnet.o -o $@ $(LDFLAGS)
 
 afl-tmin: afl-tmin.c $(COMM_HDR) | test_x86
 	$(CC) $(CFLAGS) $@.c -o $@ $(LDFLAGS)

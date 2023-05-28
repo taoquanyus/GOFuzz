@@ -368,9 +368,24 @@ int send_to_server() {
     fclose(fp);
     close(sockfd);
 
-
     //Extract response codes
+    state_sequence = (*extract_response_codes)(response_buf, response_buf_size, &state_count);
 
+    fprintf(stderr, "\n--------------------------------");
+    fprintf(stderr, "\nResponses from server:");
+
+    for (i = 0; i < state_count; i++) {
+        fprintf(stderr, "%d-", state_sequence[i]);
+    }
+
+    fprintf(stderr, "\n++++++++++++++++++++++++++++++++\nResponses in details:\n");
+    for (i = 0; i < response_buf_size; i++) {
+        fprintf(stderr, "%c", response_buf[i]);
+    }
+    fprintf(stderr, "\n--------------------------------");
+
+    //Free memory
+    ck_free(state_sequence);
     if (buf) ck_free(buf);
     ck_free(response_buf);
 }
@@ -395,7 +410,7 @@ static void run_target(char **argv) {
 
     if (!quiet_mode)
         SAYF("-- Program output begins --\n" cRST);
-
+    memset(trace_bits, 0, MAP_SIZE);
     MEM_BARRIER();
 
     child_pid = fork();
@@ -464,7 +479,8 @@ static void run_target(char **argv) {
 
     setitimer(ITIMER_REAL, &it, NULL);
 
-    send_to_server();
+    send_to_server();///////////////////
+
     if (waitpid(child_pid, &status, 0) <= 0) FATAL("waitpid() failed");
 
     child_pid = 0;
@@ -931,8 +947,6 @@ int main(int argc, char **argv) {
 
     set_up_environment();
 
-    find_binary(argv[optind]);
-
     if (optind == argc || !out_file) usage(argv[0]);
 
     if (!strcmp(protocol, "RTSP")) extract_response_codes = &extract_response_codes_rtsp;
@@ -952,12 +966,14 @@ int main(int argc, char **argv) {
     }
 
 
+    detect_file_args(argv + optind);
+
+    find_binary(argv[optind]);
+
     if (!quiet_mode) {
         show_banner();
         ACTF("Executing '%s'...\n", target_path);
     }
-
-    detect_file_args(argv + optind);
 
     if (qemu_mode)
         use_argv = get_qemu_argv(argv[0], argv + optind, argc - optind);

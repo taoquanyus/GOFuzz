@@ -289,7 +289,15 @@ static void move_process_to_netns() {
     if (setns(netns_fd, CLONE_NEWNET) == -1)
         PFATAL("setns failed");
 }
+static u32 write_bits(){
+    u32 i, ret = 0;
+    for (i = 0; i < MAP_SIZE; i++) {
 
+        if (!trace_bits[i]) continue;
+        ret++;
+    }
+    printf("%u\n", ret);
+}
 int send_to_server() {
     //Wait for the server to initialize
     usleep(server_wait_usecs);
@@ -337,6 +345,7 @@ int send_to_server() {
             return 1;
         }
     }
+    write_bits();
 
 //Send requests one by one
     //And save all the server responses
@@ -410,15 +419,17 @@ static void run_target(char **argv) {
 
     if (!quiet_mode)
         SAYF("-- Program output begins --\n" cRST);
-    memset(trace_bits, 0, MAP_SIZE);
+//    memset(trace_bits, 0, MAP_SIZE);
     MEM_BARRIER();
 
     child_pid = fork();
+//    sleep(10);
 
+    printf("pid: %d\n", child_pid);
     if (child_pid < 0) PFATAL("fork() failed");
 
     if (!child_pid) {
-
+        //子进程
         struct rlimit r;
 
         if (quiet_mode) {
@@ -433,7 +444,6 @@ static void run_target(char **argv) {
             close(fd);
 
         }
-
         if (mem_limit) {
 
             r.rlim_max = r.rlim_cur = ((rlim_t) mem_limit) << 20;
@@ -455,20 +465,22 @@ static void run_target(char **argv) {
 
         setrlimit(RLIMIT_CORE, &r); /* Ignore errors */
 
-        move_process_to_netns(); //aflnet
+//        move_process_to_netns(); //aflnet
         if (!getenv("LD_BIND_LAZY")) setenv("LD_BIND_NOW", "1", 0);
 
         setsid();
+        char* argv_list[] = {"testOnDemandRTSPServer","8554",NULL};
 
-        execv(target_path, argv);
+        if(execv("/home/mi/Desktop/workspace/live555/testProgs/testOnDemandRTSPServer", argv_list)==-1){
+            printf("execv:error!");
+        }
 
         *(u32 *) trace_bits = EXEC_FAIL_SIG;
         exit(0);
 
     }
-
     /* Configure timeout, wait for child, cancel timeout. */
-
+    sleep(10);
     if (exec_tmout) {
 
         child_timed_out = 0;
@@ -478,7 +490,7 @@ static void run_target(char **argv) {
     }
 
     setitimer(ITIMER_REAL, &it, NULL);
-
+    write_bits();
     send_to_server();///////////////////
 
     if (waitpid(child_pid, &status, 0) <= 0) FATAL("waitpid() failed");
@@ -630,7 +642,7 @@ static void detect_file_args(char **argv) {
 
 static void show_banner(void) {
 
-    SAYF(cCYA "aflnet-showmap " cBRI VERSION cRST " by <quanyu@kth.se>\n");
+    SAYF(cCYA "aflnet-showmap " cBRI VERSION cRST " by <quanyu1@kth.se>\n");
 
 }
 
@@ -966,7 +978,7 @@ int main(int argc, char **argv) {
     }
 
 
-    detect_file_args(argv + optind);
+    detect_file_args(argv + optind+1);
 
     find_binary(argv[optind]);
 

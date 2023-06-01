@@ -86,7 +86,6 @@ EXP_ST u64 mem_limit = MEM_LIMIT;    /* Memory cap for child (MB)        */
 static u32 stats_update_freq = 2;     /* Stats update frequency (execs)   */
 
 EXP_ST u8 skip_deterministic,        /* Skip deterministic stages?       */
-force_deterministic,       /* Force deterministic stages?      */
 use_splicing,              /* Recombine input files?           */
 dumb_mode,                 /* Run in non-instrumented mode?    */
 score_changed,             /* Scoring for favorites changed?   */
@@ -104,7 +103,7 @@ no_cpu_meter_red,          /* Feng shui on the status screen   */
 no_arith,                  /* Skip most arithmetic ops         */
 shuffle_queue,             /* Shuffle input queue?             */
 bitmap_changed = 1,        /* Time to update bitmap?           */
-qemu_mode,                 /* Running in QEMU mode?            */
+qemu_mode,                 /* Running in QEMU mode?            */ //无源码模式
 skip_requested,            /* Skip request, via SIGUSR1        */
 run_over10m,               /* Run time over 10 minutes?        */
 persistent_mode,           /* Running in persistent mode?      */
@@ -219,7 +218,7 @@ struct queue_entry {
     u8 cal_failed,                     /* Calibration failed?              */
     trim_done,                      /* Trimmed?                         */
     was_fuzzed,                     /* Had any fuzzing done yet?        */
-    passed_det,                     /* Deterministic stages passed?     */
+//    passed_det,                     /* Deterministic stages passed?     */
     has_new_cov,                    /* Triggers new coverage?           */
     var_behavior,                   /* Variable behavior?               */
     favored,                        /* Currently favored?               */
@@ -266,8 +265,6 @@ static u32 extras_cnt;                /* Total number of tokens read      */
 
 static struct extra_data *a_extras;   /* Automatically selected extras    */
 static u32 a_extras_cnt;              /* Total number of tokens available */
-
-static u8 *(*post_handler)(u8 *buf, u32 *len);
 
 /* Interesting values, as per config.h */
 
@@ -1473,54 +1470,6 @@ static u8 *DTD(u64 cur_ms, u64 event_ms) {
 }
 
 
-/* Mark deterministic checks as done for a particular queue entry. We use the
-   .state file to avoid repeating deterministic fuzzing when resuming aborted
-   scans. */
-
-static void mark_as_det_done(struct queue_entry *q) {
-
-    u8 *fn = strrchr(q->fname, '/');
-    s32 fd;
-
-    fn = alloc_printf("%s/queue/.state/deterministic_done/%s", out_dir, fn + 1);
-
-    fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
-    if (fd < 0) PFATAL("Unable to create '%s'", fn);
-    close(fd);
-
-    ck_free(fn);
-
-    q->passed_det = 1;
-
-}
-
-
-/* Mark as variable. Create symlinks if possible to make it easier to examine
-   the files. */
-
-static void mark_as_variable(struct queue_entry *q) {
-
-    u8 *fn = strrchr(q->fname, '/') + 1, *ldest;
-
-    ldest = alloc_printf("../../%s", fn);
-    fn = alloc_printf("%s/queue/.state/variable_behavior/%s", out_dir, fn);
-
-    if (symlink(ldest, fn)) {
-
-        s32 fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
-        if (fd < 0) PFATAL("Unable to create '%s'", fn);
-        close(fd);
-
-    }
-
-    ck_free(ldest);
-    ck_free(fn);
-
-    q->var_behavior = 1;
-
-}
-
-
 /* Mark / unmark as redundant (edge-only). This is not used for restoring state,
    but may be useful for post-processing datasets. */
 
@@ -1555,14 +1504,13 @@ static void mark_as_redundant(struct queue_entry *q, u8 state) {
 
 /* Append new test case to the queue. */
 
-static void add_to_queue(u8 *fname, u32 len, u8 passed_det) {
+static void add_to_queue(u8 *fname, u32 len) {
 
     struct queue_entry *q = ck_alloc(sizeof(struct queue_entry));
 
     q->fname = fname;
     q->len = len;
     q->depth = cur_depth + 1;
-    q->passed_det = passed_det;
     q->regions = NULL;
     q->region_count = 0;
     q->index = queued_paths;
@@ -2075,7 +2023,7 @@ static void update_bitmap_score(struct queue_entry *q) {
     /* For every byte set in trace_bits[], see if there is a previous winner,
      and how it compares to us. */
 
-    for (i = 0; i < MAP_SIZE; i++)
+    for (i = 0; i < MAP_SIZE; i++) {
 
         if (trace_bits[i]) {
 
@@ -2114,7 +2062,7 @@ static void update_bitmap_score(struct queue_entry *q) {
             score_changed = 1;
 
         }
-
+    }
 }
 
 
@@ -2217,33 +2165,6 @@ EXP_ST void setup_shm(void) {
 }
 
 
-/* Load postprocessor, if available. */
-
-static void setup_post(void) {
-
-    void *dh;
-    u8 *fn = getenv("AFL_POST_LIBRARY");
-    u32 tlen = 6;
-
-    if (!fn) return;
-
-    ACTF("Loading postprocessor from '%s'...", fn);
-
-    dh = dlopen(fn, RTLD_NOW);
-    if (!dh) FATAL("%s", dlerror());
-
-    post_handler = dlsym(dh, "afl_postprocess");
-    if (!post_handler) FATAL("Symbol 'afl_postprocess' not found.");
-
-    /* Do a quick test. It's better to segfault now than later =) */
-
-    post_handler("hello", &tlen);
-
-    OKF("Postprocessor installed successfully.");
-
-}
-
-
 /* Read all testcases from the input directory, then queue them for testing.
    Called at startup. */
 
@@ -2296,9 +2217,7 @@ static void read_testcases(void) {
         struct stat st;
 
         u8 *fn = alloc_printf("%s/%s", in_dir, nl[i]->d_name);
-        u8 *dfn = alloc_printf("%s/.state/deterministic_done/%s", in_dir, nl[i]->d_name);
 
-        u8 passed_det = 0;
 
         free(nl[i]); /* not tracked */
 
@@ -2310,7 +2229,6 @@ static void read_testcases(void) {
         if (!S_ISREG(st.st_mode) || !st.st_size || strstr(fn, "/README.txt")) {
 
             ck_free(fn);
-            ck_free(dfn);
             continue;
 
         }
@@ -2324,10 +2242,8 @@ static void read_testcases(void) {
        fuzzing when resuming aborted scans, because it would be pointless
        and probably very time-consuming. */
 
-        if (!access(dfn, F_OK)) passed_det = 1;
-        ck_free(dfn);
 
-        add_to_queue(fn, st.st_size, passed_det);
+        add_to_queue(fn, st.st_size);
 
     }
 
@@ -2942,22 +2858,6 @@ EXP_ST void init_forkserver(char **argv) {
 
         if (!getenv("LD_BIND_LAZY")) setenv("LD_BIND_NOW", "1", 0);
 
-//        /* Set sane defaults for ASAN if nothing else specified. */
-//
-//        setenv("ASAN_OPTIONS", "abort_on_error=1:"
-//                               "detect_leaks=0:"
-//                               "symbolize=0:"
-//                               "allocator_may_return_null=1", 0);
-//
-//        /* MSAN is tricky, because it doesn't support abort_on_error=1 at this
-//       point. So, we do this in a very hacky way. */
-//
-//        setenv("MSAN_OPTIONS", "exit_code=" STRINGIFY(MSAN_ERROR) ":"
-//                               "symbolize=0:"
-//                               "abort_on_error=1:"
-//                               "allocator_may_return_null=1:"
-//                               "msan_track_origins=0", 0);
-
         execv(target_path, argv);
 
         /* Use a distinctive bitmap signature to tell the parent about execv()
@@ -3371,7 +3271,6 @@ static void check_map_coverage(void) {
 static void perform_dry_run(char **argv) {
 
     struct queue_entry *q = queue;
-    u32 cal_failures = 0;
     u8 *skip_crashes = getenv("AFL_SKIP_CRASHES");
 
     while (q) {
@@ -3425,119 +3324,18 @@ static void perform_dry_run(char **argv) {
 
                 if (q == queue) check_map_coverage();
 
-                if (crash_mode) FATAL("Test case '%s' does *NOT* crash", fn);
-
                 break;
 
             case FAULT_TMOUT:
 
-                if (timeout_given) {
-
-                    /* The -t nn+ syntax in the command line sets timeout_given to '2' and
-             instructs afl-fuzz to tolerate but skip queue entries that time
-             out. */
-
-                    if (timeout_given > 1) {
-                        WARNF("Test case results in a timeout (skipping)");
-                        q->cal_failed = CAL_CHANCES;
-                        cal_failures++;
-                        break;
-                    }
-
-                    SAYF("\n" cLRD "[-] " cRST
-                                 "The program took more than %u ms to process one of the initial test cases.\n"
-                                 "    Usually, the right thing to do is to relax the -t option - or to delete it\n"
-                                 "    altogether and allow the fuzzer to auto-calibrate. That said, if you know\n"
-                                 "    what you are doing and want to simply skip the unruly test cases, append\n"
-                                 "    '+' at the end of the value passed to -t ('-t %u+').\n", exec_tmout,
-                         exec_tmout);
-
-                    FATAL("Test case '%s' results in a timeout", fn);
-
-                } else {
-
-                    SAYF("\n" cLRD "[-] " cRST
-                                 "The program took more than %u ms to process one of the initial test cases.\n"
-                                 "    This is bad news; raising the limit with the -t option is possible, but\n"
-                                 "    will probably make the fuzzing process extremely slow.\n\n"
-
-                                 "    If this test case is just a fluke, the other option is to just avoid it\n"
-                                 "    altogether, and find one that is less of a CPU hog.\n", exec_tmout);
-
-                    FATAL("Test case '%s' results in a timeout", fn);
-
-                }
-
-            case FAULT_CRASH:
-
-                if (crash_mode) break;
-
-                if (skip_crashes) {
-                    WARNF("Test case results in a crash (skipping)");
+                if (timeout_given > 1) {
+                    WARNF("Test case results in a timeout (skipping)");
                     q->cal_failed = CAL_CHANCES;
-                    cal_failures++;
                     break;
                 }
+                FATAL("Test case '%s' results in a timeout", fn);
 
-                if (mem_limit) {
-
-                    SAYF("\n" cLRD "[-] " cRST
-                                 "Oops, the program crashed with one of the test cases provided. There are\n"
-                                 "    several possible explanations:\n\n"
-
-                                 "    - The test case causes known crashes under normal working conditions. If\n"
-                                 "      so, please remove it. The fuzzer should be seeded with interesting\n"
-                                 "      inputs - but not ones that cause an outright crash.\n\n"
-
-                                 "    - The current memory limit (%s) is too low for this program, causing\n"
-                                 "      it to die due to OOM when parsing valid files. To fix this, try\n"
-                                 "      bumping it up with the -m setting in the command line. If in doubt,\n"
-                                 "      try something along the lines of:\n\n"
-
-#ifdef RLIMIT_AS
-                                 "      ( ulimit -Sv $[%llu << 10]; /path/to/binary [...] <testcase )\n\n"
-#else
-                                 "      ( ulimit -Sd $[%llu << 10]; /path/to/binary [...] <testcase )\n\n"
-#endif /* ^RLIMIT_AS */
-
-                                 "      Tip: you can use http://jwilk.net/software/recidivm to quickly\n"
-                                 "      estimate the required amount of virtual memory for the binary. Also,\n"
-                                 "      if you are using ASAN, see %s/notes_for_asan.txt.\n\n"
-
-#ifdef __APPLE__
-
-                                 "    - On MacOS X, the semantics of fork() syscalls are non-standard and may\n"
-                                 "      break afl-fuzz performance optimizations when running platform-specific\n"
-                                 "      binaries. To fix this, set AFL_NO_FORKSRV=1 in the environment.\n\n"
-
-#endif /* __APPLE__ */
-
-                                 "    - Least likely, there is a horrible bug in the fuzzer. If other options\n"
-                                 "      fail, poke <lcamtuf@coredump.cx> for troubleshooting tips.\n",
-                         DMS(mem_limit << 20), mem_limit - 1, doc_path);
-
-                } else {
-
-                    SAYF("\n" cLRD "[-] " cRST
-                                 "Oops, the program crashed with one of the test cases provided. There are\n"
-                                 "    several possible explanations:\n\n"
-
-                                 "    - The test case causes known crashes under normal working conditions. If\n"
-                                 "      so, please remove it. The fuzzer should be seeded with interesting\n"
-                                 "      inputs - but not ones that cause an outright crash.\n\n"
-
-#ifdef __APPLE__
-
-                                 "    - On MacOS X, the semantics of fork() syscalls are non-standard and may\n"
-                                 "      break afl-fuzz performance optimizations when running platform-specific\n"
-                                 "      binaries. To fix this, set AFL_NO_FORKSRV=1 in the environment.\n\n"
-
-#endif /* __APPLE__ */
-
-                                 "    - Least likely, there is a horrible bug in the fuzzer. If other options\n"
-                                 "      fail, poke <lcamtuf@coredump.cx> for troubleshooting tips.\n");
-
-                }
+            case FAULT_CRASH:
 
                 FATAL("Test case '%s' results in a crash", fn);
 
@@ -3560,28 +3358,11 @@ static void perform_dry_run(char **argv) {
 
         }
 
-        if (q->var_behavior) WARNF("Instrumentation output varies across runs.");
-
         q = q->next;
 
     }
 
-    if (cal_failures) {
-
-        if (cal_failures == queued_paths)
-            FATAL("All test cases time out%s, giving up!",
-                  skip_crashes ? " or crash" : "");
-
-        WARNF("Skipped %u test cases (%0.02f%%) due to timeouts%s.", cal_failures,
-              ((double) cal_failures) * 100 / queued_paths,
-              skip_crashes ? " or crashes" : "");
-
-        if (cal_failures * 5 > queued_paths)
-            WARNF(cLRD "High percentage of rejected test cases, check settings!");
-
-    }
-
-    OKF("All test cases processed.");
+    OKF("All test cases dry_run finished.");
 
 }
 
@@ -3695,9 +3476,6 @@ static void pivot_inputs(void) {
         ck_free(q->fname);
         q->fname = nfn;
 
-        /* Make sure that the passed_det value carries over, too. */
-
-        if (q->passed_det) mark_as_det_done(q);
 
         q = q->next;
         id++;
@@ -3812,62 +3590,39 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault) {
     //s32 fd;
     u8 keeping = 0, res;
 
-    if (fault == crash_mode) {
 
-        /* Keep only if there are new bits in the map, add to queue for
-       future fuzzing, etc. */
+    /* Keep only if there are new bits in the map, add to queue for
+   future fuzzing, etc. */
 
-        if (!(hnb = has_new_bits(virgin_bits))) {
-            if (crash_mode) total_crashes++;
-            return 0;
-        }
-
-#ifndef SIMPLE_FILES
-
-        fn = alloc_printf("%s/queue/id:%06u,%s", out_dir, queued_paths,
-                          describe_op(hnb));
-
-#else
-
-        fn = alloc_printf("%s/queue/id_%06u", out_dir, queued_paths);
-
-#endif /* ^!SIMPLE_FILES */
-
-        u32 full_len = save_kl_messages_to_file(kl_messages, fn, 0, messages_sent);
-
-        /* We use the actual length of all messages (full_len), not the len of the mutated message subsequence (len)*/
-        add_to_queue(fn, full_len, 0);
-
-        if (state_aware_mode) update_state_aware_variables(queue_top, 0);
-
-        /* save the seed to file for replaying */
-        u8 *fn_replay = alloc_printf("%s/replayable-queue/%s", out_dir, basename(queue_top->fname));
-        save_kl_messages_to_file(kl_messages, fn_replay, 1, messages_sent);
-        ck_free(fn_replay);
-
-        if (hnb == 2) {
-            queue_top->has_new_cov = 1;
-            queued_with_cov++;
-        }
-
-        queue_top->exec_cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
-
-        /* Try to calibrate inline; this also calls update_bitmap_score() when
-       successful. */
-
-        res = calibrate_case(argv, queue_top, mem, queue_cycle - 1, 0);
-
-        if (res == FAULT_ERROR)
-            FATAL("Unable to execute target application");
-
-        /*fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
-    if (fd < 0) PFATAL("Unable to create '%s'", fn);
-    ck_write(fd, mem, len, fn);
-    close(fd);*/
-
-        keeping = 1;
-
+    if (!(hnb = has_new_bits(virgin_bits))) {
+        if (crash_mode) total_crashes++;
+        return 0;
     }
+    fn = alloc_printf("%s/queue/id:%06u,%s", out_dir, queued_paths,
+                      describe_op(hnb));
+
+    u32 full_len = save_kl_messages_to_file(kl_messages, fn, 0, messages_sent);
+
+    /* We use the actual length of all messages (full_len), not the len of the mutated message subsequence (len)*/
+    add_to_queue(fn, full_len);
+
+    if (state_aware_mode) update_state_aware_variables(queue_top, 0);
+
+    /* save the seed to file for replaying */
+    u8 *fn_replay = alloc_printf("%s/replayable-queue/%s", out_dir, basename(queue_top->fname));
+    save_kl_messages_to_file(kl_messages, fn_replay, 1, messages_sent);
+    ck_free(fn_replay);
+
+    if (hnb == 2) {
+        queue_top->has_new_cov = 1;
+        queued_with_cov++;
+    }
+
+    queue_top->exec_cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
+    update_bitmap_score(queue_top);//add
+
+    keeping = 1;
+
 
     switch (fault) {
 
@@ -4001,42 +3756,6 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault) {
     return keeping;
 
 }
-
-
-/* When resuming, try to find the queue position to start from. This makes sense
-   only when resuming, and when we can find the original fuzzer_stats. */
-
-static u32 find_start_position(void) {
-
-    static u8 tmp[4096]; /* Ought to be enough for anybody. */
-
-    u8 *fn, *off;
-    s32 fd, i;
-    u32 ret;
-
-    if (!resuming_fuzz) return 0;
-
-    if (in_place_resume) fn = alloc_printf("%s/fuzzer_stats", out_dir);
-    else fn = alloc_printf("%s/../fuzzer_stats", in_dir);
-
-    fd = open(fn, O_RDONLY);
-    ck_free(fn);
-
-    if (fd < 0) return 0;
-
-    i = read(fd, tmp, sizeof(tmp) - 1);
-    (void) i; /* Ignore errors */
-    close(fd);
-
-    off = strstr(tmp, "cur_path          : ");
-    if (!off) return 0;
-
-    ret = atoi(off + 20);
-    if (ret >= queued_paths) ret = 0;
-    return ret;
-
-}
-
 
 /* The same, but for timeouts. The idea is that when resuming sessions without
    -t given, we don't want to keep auto-scaling the timeout over and over
@@ -5224,13 +4943,6 @@ EXP_ST u8 common_fuzz_stuff(char **argv, u8 *out_buf, u32 len) {
 
     u8 fault;
 
-    if (post_handler) {
-
-        out_buf = post_handler(out_buf, &len);
-        if (!out_buf || !len) return 0;
-
-    }
-
 
     /* AFLNet update kl_messages linked list */
 
@@ -5340,8 +5052,7 @@ EXP_ST u8 common_fuzz_stuff(char **argv, u8 *out_buf, u32 len) {
 
     queued_discovered += save_if_interesting(argv, out_buf, len, fault);
 
-    if (!(stage_cur % stats_update_freq) || stage_cur + 1 == stage_max)
-        show_stats();
+    if (!(total_execs % 10)) show_stats();
 
     return 0;
 
@@ -5691,57 +5402,6 @@ static u8 fuzz_one(char **argv) {
     u8 a_collect[MAX_AUTO_EXTRA];
     u32 a_len = 0;
 
-#ifdef IGNORE_FINDS
-
-                                                                                                                            /* In IGNORE_FINDS mode, skip any entries that weren't in the
-     initial data set. */
-
-  if (queue_cur->depth > 1) return 1;
-
-#else
-
-    //Skip some steps if in state_aware_mode because in this mode
-    //the seed is selected based on state-aware algorithms
-    if (state_aware_mode) goto AFLNET_REGIONS_SELECTION;
-
-    if (pending_favored) {
-
-        /* If we have any favored, non-fuzzed new arrivals in the queue,
-       possibly skip to them at the expense of already-fuzzed or non-favored
-       cases. */
-
-        if ((queue_cur->was_fuzzed || !queue_cur->favored) &&
-            UR(100) < SKIP_TO_NEW_PROB)
-            return 1;
-
-    } else if (!dumb_mode && !queue_cur->favored && queued_paths > 10) {
-
-        /* Otherwise, still possibly skip non-favored cases, albeit less often.
-       The odds of skipping stuff are higher for already-fuzzed inputs and
-       lower for never-fuzzed entries. */
-
-        if (queue_cycle > 1 && !queue_cur->was_fuzzed) {
-
-            if (UR(100) < SKIP_NFAV_NEW_PROB) return 1;
-
-        } else {
-
-            if (UR(100) < SKIP_NFAV_OLD_PROB) return 1;
-
-        }
-
-    }
-
-#endif /* ^IGNORE_FINDS */
-
-    if (not_on_tty) {
-        ACTF("Fuzzing test case #%u (%u total, %llu uniq crashes found)...",
-             current_entry, queued_paths, unique_crashes);
-        fflush(stdout);
-    }
-
-    AFLNET_REGIONS_SELECTION:;
-
     subseq_tmouts = 0;
 
     cur_depth = queue_cur->depth;
@@ -5752,57 +5412,47 @@ static u8 fuzz_one(char **argv) {
   and M2_region_count which is the total number of regions in M2. How the information is identified is
   state aware dependent. However, once the information is clear, the code for fuzzing preparation is the same */
 
-    if (state_aware_mode) {
-        /* In state aware mode, select M2 based on the targeted state ID */
-        u32 total_region = queue_cur->region_count;
-        if (total_region == 0) PFATAL("0 region found for %s", queue_cur->fname);
+    /* In state aware mode, select M2 based on the targeted state ID */
+    u32 total_region = queue_cur->region_count;
+    if (total_region == 0) PFATAL("0 region found for %s", queue_cur->fname);
 
-        if (target_state_id == 0) {
-            //No prefix subsequence (M1 is empty)
-            M2_start_region_ID = 0;
-            M2_region_count = 0;
+    if (target_state_id == 0) {
+        //No prefix subsequence (M1 is empty)
+        M2_start_region_ID = 0;
+        M2_region_count = 0;
 
-            //To compute M2_region_count, we identify the first region which has a different annotation
-            //Now we quickly compare the state count, we could make it more fine grained by comparing the exact response codes
-            for (i = 0; i < queue_cur->region_count; i++) {
-                if (queue_cur->regions[i].state_count != queue_cur->regions[0].state_count) break;
-                M2_region_count++;
-            }
-        } else {
-            //M1 is unlikely to be empty
-            M2_start_region_ID = 0;
-
-            //Identify M2_start_region_ID first based on the target_state_id
-            for (i = 0; i < queue_cur->region_count; i++) {
-                u32 regionalStateCount = queue_cur->regions[i].state_count;
-                if (regionalStateCount > 0) {
-                    //reachableStateID is the last ID in the state_sequence
-                    u32 reachableStateID = queue_cur->regions[i].state_sequence[regionalStateCount - 1];
-                    M2_start_region_ID++;
-                    if (reachableStateID == target_state_id) break;
-                } else {
-                    //No annotation for this region
-                    return 1;
-                }
-            }
-
-            //Then identify M2_region_count
-            for (i = M2_start_region_ID; i < queue_cur->region_count; i++) {
-                if (queue_cur->regions[i].state_count != queue_cur->regions[M2_start_region_ID].state_count) break;
-                M2_region_count++;
-            }
-
-            //Handle corner case(s) and skip the current queue entry
-            if (M2_start_region_ID >= queue_cur->region_count) return 1;
+        //To compute M2_region_count, we identify the first region which has a different annotation
+        //Now we quickly compare the state count, we could make it more fine grained by comparing the exact response codes
+        for (i = 0; i < queue_cur->region_count; i++) {
+            if (queue_cur->regions[i].state_count != queue_cur->regions[0].state_count) break;
+            M2_region_count++;
         }
     } else {
-        /* Select M2 randomly */
-        u32 total_region = queue_cur->region_count;
-        if (total_region == 0) PFATAL("0 region found for %s", queue_cur->fname);
+        //M1 is unlikely to be empty
+        M2_start_region_ID = 0;
 
-        M2_start_region_ID = UR(total_region);
-        M2_region_count = UR(total_region - M2_start_region_ID);
-        if (M2_region_count == 0) M2_region_count++; //Mutate one region at least
+        //Identify M2_start_region_ID first based on the target_state_id
+        for (i = 0; i < queue_cur->region_count; i++) {
+            u32 regionalStateCount = queue_cur->regions[i].state_count;
+            if (regionalStateCount > 0) {
+                //reachableStateID is the last ID in the state_sequence
+                u32 reachableStateID = queue_cur->regions[i].state_sequence[regionalStateCount - 1];
+                M2_start_region_ID++;
+                if (reachableStateID == target_state_id) break;
+            } else {
+                //No annotation for this region
+                return 1;
+            }
+        }
+
+        //Then identify M2_region_count
+        for (i = M2_start_region_ID; i < queue_cur->region_count; i++) {
+            if (queue_cur->regions[i].state_count != queue_cur->regions[M2_start_region_ID].state_count) break;
+            M2_region_count++;
+        }
+
+        //Handle corner case(s) and skip the current queue entry
+        if (M2_start_region_ID >= queue_cur->region_count) return 1;
     }
 
     /* Construct the kl_messages linked list and identify boundary pointers (M2_prev and M2_next) */
@@ -5833,6 +5483,7 @@ static u8 fuzz_one(char **argv) {
     }
 
     u32 in_buf_size = 0;
+    // inbuf 就是我要变异的内容
     while (it != M2_next) {
         in_buf = (u8 *) ck_realloc(in_buf, in_buf_size + kl_val(it)->msize);
         if (!in_buf) PFATAL("AFLNet cannot allocate memory for in_buf");
@@ -5842,6 +5493,7 @@ static u8 fuzz_one(char **argv) {
         in_buf_size += kl_val(it)->msize;
         it = kl_next(it);
     }
+    //其实从这里开始就可以使用梯度信息了。
 
     orig_in = in_buf;
 
@@ -5864,7 +5516,7 @@ static u8 fuzz_one(char **argv) {
      this entry ourselves (was_fuzzed), or if it has gone through deterministic
      testing in earlier, resumed runs (passed_det). */
 
-    if (skip_deterministic || queue_cur->was_fuzzed || queue_cur->passed_det)
+    if (queue_cur->was_fuzzed)
         goto havoc_stage;
 
     /* Skip deterministic fuzzing if exec path checksum puts this out of scope
@@ -5934,7 +5586,7 @@ static u8 fuzz_one(char **argv) {
 
       */
 
-        if (!dumb_mode && (stage_cur & 7) == 7) {
+        if ((stage_cur & 7) == 7) {
 
             u32 cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
 
@@ -6828,7 +6480,6 @@ static u8 fuzz_one(char **argv) {
      we're properly done with deterministic steps and can mark it as such
      in the .state/ directory. */
 
-    if (!queue_cur->passed_det) mark_as_det_done(queue_cur);
 
     /****************
    * RANDOM HAVOC *
@@ -8036,49 +7687,6 @@ static void get_core_count(void) {
 
 }
 
-
-/* Validate and fix up out_dir and sync_dir when using -S. */
-
-static void fix_up_sync(void) {
-
-    u8 *x = sync_id;
-
-    if (dumb_mode)
-        FATAL("-S / -M and -n are mutually exclusive");
-
-    if (skip_deterministic) {
-
-        if (force_deterministic)
-            FATAL("use -S instead of -M -d");
-        else
-            FATAL("-S already implies -d");
-
-    }
-
-    while (*x) {
-
-        if (!isalnum(*x) && *x != '_' && *x != '-')
-            FATAL("Non-alphanumeric fuzzer ID specified via -S or -M");
-
-        x++;
-
-    }
-
-    if (strlen(sync_id) > 32) FATAL("Fuzzer ID too long");
-
-    x = alloc_printf("%s/%s", out_dir, sync_id);
-
-    sync_dir = out_dir;
-    out_dir = x;
-
-    if (!force_deterministic) {
-        skip_deterministic = 1;
-        use_splicing = 1;
-    }
-
-}
-
-
 /* Handle screen resize (SIGWINCH). */
 
 static void handle_resize(int sig) {
@@ -8209,80 +7817,6 @@ EXP_ST void setup_signal_handlers(void) {
 }
 
 
-/* Rewrite argv for QEMU. */
-
-static char **get_qemu_argv(u8 *own_loc, char **argv, int argc) {
-
-    char **new_argv = ck_alloc(sizeof(char *) * (argc + 4));
-    u8 *tmp, *cp, *rsl, *own_copy;
-
-    /* Workaround for a QEMU stability glitch. */
-
-    setenv("QEMU_LOG", "nochain", 1);
-
-    memcpy(new_argv + 3, argv + 1, sizeof(char *) * argc);
-
-    new_argv[2] = target_path;
-    new_argv[1] = "--";
-
-    /* Now we need to actually find the QEMU binary to put in argv[0]. */
-
-    tmp = getenv("AFL_PATH");
-
-    if (tmp) {
-
-        cp = alloc_printf("%s/afl-qemu-trace", tmp);
-
-        if (access(cp, X_OK))
-            FATAL("Unable to find '%s'", tmp);
-
-        target_path = new_argv[0] = cp;
-        return new_argv;
-
-    }
-
-    own_copy = ck_strdup(own_loc);
-    rsl = strrchr(own_copy, '/');
-
-    if (rsl) {
-
-        *rsl = 0;
-
-        cp = alloc_printf("%s/afl-qemu-trace", own_copy);
-        ck_free(own_copy);
-
-        if (!access(cp, X_OK)) {
-
-            target_path = new_argv[0] = cp;
-            return new_argv;
-
-        }
-
-    } else
-        ck_free(own_copy);
-
-    if (!access(BIN_PATH "/afl-qemu-trace", X_OK)) {
-
-        target_path = new_argv[0] = ck_strdup(BIN_PATH "/afl-qemu-trace");
-        return new_argv;
-
-    }
-
-    SAYF("\n" cLRD "[-] " cRST
-                 "Oops, unable to find the 'afl-qemu-trace' binary. The binary must be built\n"
-                 "    separately by following the instructions in qemu_mode/README.qemu. If you\n"
-                 "    already have the binary installed, you may need to specify AFL_PATH in the\n"
-                 "    environment.\n\n"
-
-                 "    Of course, even without QEMU, afl-fuzz can still work with binaries that are\n"
-                 "    instrumented at compile time with afl-gcc. It is also possible to use it as a\n"
-                 "    traditional \"dumb\" fuzzer by specifying '-n' in the command line.\n");
-
-    FATAL("Failed to locate 'afl-qemu-trace'.");
-
-}
-
-
 /* Make a copy of the current command line. */
 
 static void save_cmdline(u32 argc, char **argv) {
@@ -8310,56 +7844,31 @@ static void save_cmdline(u32 argc, char **argv) {
 
 }
 
-/* Check that afl-fuzz (file/process) has some effective and permitted capability */
-
-static int check_ep_capability(cap_value_t cap, const char *filename) {
-    cap_t file_cap, proc_cap;
-    cap_flag_value_t cap_flag_value;
-    int no_capability = 1;
-    int pid = getpid();
-
-    file_cap = cap_get_file(filename);
-    proc_cap = cap_get_proc();
-
-    if (!file_cap && !proc_cap)
-        return no_capability;
-
-    if (file_cap) {
-        if (cap_get_flag(file_cap, cap, CAP_EFFECTIVE, &cap_flag_value))
-            PFATAL("Could not get CAP_EFFECTIVE flag value from file \"%s\"", filename);
-
-        if (cap_flag_value != CAP_SET)
-            return no_capability;
-
-        if (cap_get_flag(file_cap, cap, CAP_PERMITTED, &cap_flag_value))
-            PFATAL("Could not get CAP_PERMITTED flag value from file \"%s\"", filename);
-
-        if (cap_flag_value != CAP_SET)
-            return no_capability;
+static void seek_to_selected_seed(struct queue_entry *selected_seed) {
+    /* Seek to the selected seed */
+    if (selected_seed) {
+        if (!queue_cur) {//如果当前的队列为空,则让他等于队头
+            current_entry = 0;
+            cur_skipped_paths = 0;
+            queue_cur = queue;
+            queue_cycle++;
+        }
+        while (queue_cur != selected_seed) {//找到对应的队列
+            queue_cur = queue_cur->next;
+            current_entry++;
+            if (!queue_cur) {
+                current_entry = 0;
+                cur_skipped_paths = 0;
+                queue_cur = queue;
+                queue_cycle++;
+            }
+        }
     }
-
-    if (proc_cap) {
-        if (cap_get_flag(proc_cap, cap, CAP_EFFECTIVE, &cap_flag_value))
-            PFATAL("Could not get CAP_EFFECTIVE flag value from process id %d", pid);
-
-        if (cap_flag_value != CAP_SET)
-            return no_capability;
-
-        if (cap_get_flag(proc_cap, cap, CAP_PERMITTED, &cap_flag_value))
-            PFATAL("Could not get CAP_PERMITTED flag value from process id %d", pid);
-
-        if (cap_flag_value != CAP_SET)
-            return no_capability;
-    }
-
-    return 0;
 }
-
 
 /* Main entry point */
 
 int main(int argc, char **argv) {
-
     s32 opt;
     u64 prev_queued = 0;
     u32 sync_interval_cnt = 0, seek_to;
@@ -8395,36 +7904,6 @@ int main(int argc, char **argv) {
 
                 if (out_dir) FATAL("Multiple -o options not supported");
                 out_dir = optarg;
-                break;
-
-            case 'M': { /* master sync ID */
-
-                u8 *c;
-
-                if (sync_id) FATAL("Multiple -S or -M options not supported");
-                sync_id = ck_strdup(optarg);
-
-                if ((c = strchr(sync_id, ':'))) {
-
-                    *c = 0;
-
-                    if (sscanf(c + 1, "%u/%u", &master_id, &master_max) != 2 ||
-                        !master_id || !master_max || master_id > master_max ||
-                        master_max > 1000000)
-                        FATAL("Bogus master ID passed to -M");
-
-                }
-
-                force_deterministic = 1;
-
-            }
-
-                break;
-
-            case 'S':
-
-                if (sync_id) FATAL("Multiple -S or -M options not supported");
-                sync_id = ck_strdup(optarg);
                 break;
 
             case 'f': /* target file */
@@ -8510,51 +7989,11 @@ int main(int argc, char **argv) {
                 use_splicing = 1;
                 break;
 
-            case 'B': /* load bitmap */
-
-                /* This is a secret undocumented option! It is useful if you find
-           an interesting test case during a normal fuzzing process, and want
-           to mutate it without rediscovering any of the test cases already
-           found during an earlier run.
-
-           To use this mode, you need to point -B to the fuzz_bitmap produced
-           by an earlier run for the exact same binary... and that's it.
-
-           I only used this once or twice to get variants of a particular
-           file, so I'm not making this an official setting. */
-
-                if (in_bitmap) FATAL("Multiple -B options not supported");
-
-                in_bitmap = optarg;
-                read_bitmap(in_bitmap);
-                break;
-
-            case 'C': /* crash mode */
-
-                if (crash_mode) FATAL("Multiple -C options not supported");
-                crash_mode = FAULT_CRASH;
-                break;
-
-            case 'n': /* dumb mode */
-
-                if (dumb_mode) FATAL("Multiple -n options not supported");
-                if (getenv("AFL_DUMB_FORKSRV")) dumb_mode = 2; else dumb_mode = 1;
-
-                break;
 
             case 'T': /* banner */
 
                 if (use_banner) FATAL("Multiple -T options not supported");
                 use_banner = optarg;
-                break;
-
-            case 'Q': /* QEMU mode */
-
-                if (qemu_mode) FATAL("Multiple -Q options not supported");
-                qemu_mode = 1;
-
-                if (!mem_limit_given) mem_limit = MEM_LIMIT_QEMU;
-
                 break;
 
             case 'N': /* Network configuration */
@@ -8585,12 +8024,6 @@ int main(int argc, char **argv) {
                 if (sscanf(optarg, "%u", &socket_timeout_usecs) < 1 || optarg[0] == '-')
                     FATAL("Bad syntax used for -w");
                 socket_timeout = 1;
-                break;
-
-            case 'e': /* network namespace name */
-                if (netns_name) FATAL("Multiple -e options not supported");
-
-                netns_name = optarg;
                 break;
 
             case 'P': /* protocol to be tested */
@@ -8758,25 +8191,7 @@ int main(int argc, char **argv) {
             selected_seed = choose_seed(target_state_id, seed_selection_algo);
         }
 
-        /* Seek to the selected seed */
-        if (selected_seed) {
-            if (!queue_cur) {//如果当前的队列为空,则让他等于队头
-                current_entry = 0;
-                cur_skipped_paths = 0;
-                queue_cur = queue;
-                queue_cycle++;
-            }
-            while (queue_cur != selected_seed) {//找到对应的队列
-                queue_cur = queue_cur->next;
-                current_entry++;
-                if (!queue_cur) {
-                    current_entry = 0;
-                    cur_skipped_paths = 0;
-                    queue_cur = queue;
-                    queue_cycle++;
-                }
-            }
-        }
+        seek_to_selected_seed(selected_seed);
 
         fuzz_one(use_argv);
 

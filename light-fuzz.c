@@ -38,6 +38,7 @@
 #include <sys/ioctl.h>
 #include <sys/file.h>
 #include <sys/capability.h>
+#include <netinet/tcp.h>
 
 #include "aflnet.h"
 #include <graphviz/gvc.h>
@@ -102,7 +103,6 @@ auto_changed,              /* Auto-generated tokens changed?   */
 no_cpu_meter_red,          /* Feng shui on the status screen   */
 no_arith,                  /* Skip most arithmetic ops         */
 shuffle_queue,             /* Shuffle input queue?             */
-bitmap_changed = 1,        /* Time to update bitmap?           */
 qemu_mode,                 /* Running in QEMU mode?            */ //无源码模式
 skip_requested,            /* Skip request, via SIGUSR1        */
 run_over10m,               /* Run time over 10 minutes?        */
@@ -126,8 +126,6 @@ EXP_ST u8 virgin_bits[MAP_SIZE],     /* Regions yet untouched by fuzzing */
 virgin_tmout[MAP_SIZE],    /* Bits we haven't seen in tmouts   */
 virgin_crash[MAP_SIZE];    /* Bits we haven't seen in crashes  */
 
-static u8 var_bytes[MAP_SIZE];       /* Bytes that appear to be variable */
-
 static s32 shm_id;                    /* ID of the SHM region             */
 
 static volatile u8 stop_soon,         /* Ctrl-C pressed?                  */
@@ -136,7 +134,6 @@ child_timed_out;   /* Traced process timed out?        */
 
 EXP_ST u32 queued_paths,              /* Total number of queued testcases */
 queued_variable,           /* Testcases with variable behavior */
-queued_at_start,           /* Total number of initial inputs   */
 queued_discovered,         /* Items discovered during this run */
 queued_imported,           /* Items imported via -S            */
 queued_favored,            /* Paths deemed favorable           */
@@ -179,8 +176,6 @@ static u8 *stage_name = "init",       /* Name of the current fuzz stage   */
 
 static s32 stage_cur, stage_max;      /* Stage progression                */
 static s32 splicing_with = -1;        /* Splicing with which test case?   */
-
-static u32 master_id, master_max;     /* Master instance job splitting    */
 
 static u32 syncing_case;              /* Syncing with case #...           */
 
@@ -228,7 +223,6 @@ struct queue_entry {
     exec_cksum;                     /* Checksum of the execution trace  */
 
     u64 exec_us,                        /* Execution time (us)              */
-    handicap,                       /* Number of queue cycles behind    */
     depth;                          /* Path depth                       */
 
     u8 *trace_mini;                     /* Trace bytes, if kept             */
@@ -323,7 +317,7 @@ static inline u8 has_new_bits(u8 *virgin_map);
 
 /* AFLNet-specific variables & functions */
 
-u32 server_wait_usecs = 10000;
+u32 server_wait_usecs = 5000;
 u32 poll_wait_msecs = 1;
 u32 socket_timeout_usecs = 1000;
 u8 net_protocol;
@@ -654,7 +648,7 @@ unsigned int choose_target_state(u8 mode) {
 }
 
 /* Select a seed to exercise the target state */
-struct queue_entry *choose_seed(u32 target_state_id, u8 mode) {
+struct queue_entry *choose_seed(u8 mode) {
     khint_t k;
     state_info_t *state;
     struct queue_entry *result = NULL;
@@ -988,12 +982,26 @@ int send_over_network() {
 
     //Create a TCP/UDP socket
     int sockfd = -1;
-    if (net_protocol == PRO_TCP)
+    if (net_protocol == PRO_TCP){
         sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        int temp_flag=1;
+        int socket_set_flag = setsockopt( sockfd, IPPROTO_TCP, TCP_NODELAY, (char *)&temp_flag, sizeof(temp_flag) );
+        if (socket_set_flag == -1) {
+            SAYF("Couldn't setsockopt(TCP_NODELAY)\n");
+        }
+    }
     else if (net_protocol == PRO_UDP)
         sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
+
+
     if (sockfd < 0) {
+        if (terminate_child && (child_pid > 0)) kill(child_pid, SIGTERM);
+        //give the server a bit more time to gracefully terminate
+        while (1) {
+            int status = kill(child_pid, 0);
+            if ((status != 0) && (errno == ESRCH)) break;
+        }
         PFATAL("Cannot create a socket");
     }
 
@@ -1081,9 +1089,10 @@ int send_over_network() {
 
     //wait a bit letting the server to complete its remaining task(s)
     memset(session_virgin_bits, 255, MAP_SIZE);
-    while (1) {
-        if (has_new_bits(session_virgin_bits) != 2) break;
-    }
+//    while (1) {
+//        if (has_new_bits(session_virgin_bits) != 2)
+//            break;
+//    }
 
     close(sockfd);
 
@@ -1607,46 +1616,6 @@ EXP_ST void destroy_queue(void) {
 }
 
 
-/* Write bitmap to file. The bitmap is useful mostly for the secret
-   -B option, to focus a separate fuzzing session on a particular
-   interesting input without rediscovering all the others. */
-
-EXP_ST void write_bitmap(void) {
-
-    u8 *fname;
-    s32 fd;
-
-    if (!bitmap_changed) return;
-    bitmap_changed = 0;
-
-    fname = alloc_printf("%s/fuzz_bitmap", out_dir);
-    fd = open(fname, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-
-    if (fd < 0) PFATAL("Unable to open '%s'", fname);
-
-    ck_write(fd, virgin_bits, MAP_SIZE, fname);
-
-    close(fd);
-    ck_free(fname);
-
-}
-
-
-/* Read bitmap from file. This is for the -B option again. */
-
-EXP_ST void read_bitmap(u8 *fname) {
-
-    s32 fd = open(fname, O_RDONLY);
-
-    if (fd < 0) PFATAL("Unable to open '%s'", fname);
-
-    ck_read(fd, virgin_bits, MAP_SIZE, fname);
-
-    close(fd);
-
-}
-
-
 /* Check if the current execution path brings anything new to the table.
    Update virgin bits to reflect the finds. Returns 1 if the only change is
    the hit-count for a particular tuple; 2 if there are new tuples seen.
@@ -1719,7 +1688,6 @@ static inline u8 has_new_bits(u8 *virgin_map) {
 
     }
 
-    if (ret && virgin_map == virgin_bits) bitmap_changed = 1;
 
     return ret;
 
@@ -2078,7 +2046,7 @@ static void cull_queue(void) {
     static u8 temp_v[MAP_SIZE >> 3];
     u32 i;
 
-    if (dumb_mode || !score_changed) return;
+    if (!score_changed) return;
 
     score_changed = 0;
 
@@ -2265,7 +2233,6 @@ static void read_testcases(void) {
     }
 
     last_path_time = 0;
-    queued_at_start = queued_paths;
 
 }
 
@@ -2928,7 +2895,6 @@ static u8 run_target(char **argv, u32 timeout) {
     static u64 exec_ms = 0;
 
     int status = 0;
-    u32 tb4;
 
     child_timed_out = 0;
 
@@ -2939,117 +2905,24 @@ static u8 run_target(char **argv, u32 timeout) {
     memset(trace_bits, 0, MAP_SIZE);
     MEM_BARRIER();
 
-    /* If we're running in "dumb" mode, we can't rely on the fork server
-     logic compiled into the target program, so we will just keep calling
-     execve(). There is a bit of code duplication between here and
-     init_forkserver(), but c'est la vie. */
+    s32 res;
 
-    if (dumb_mode == 1 || no_forkserver) {
+    if ((res = write(fsrv_ctl_fd, &prev_timed_out, 4)) != 4) {
 
-        child_pid = fork();
-
-        if (child_pid < 0) PFATAL("fork() failed");
-
-        if (!child_pid) {
-
-            struct rlimit r;
-
-            if (mem_limit) {
-
-                r.rlim_max = r.rlim_cur = ((rlim_t) mem_limit) << 20;
-
-#ifdef RLIMIT_AS
-
-                setrlimit(RLIMIT_AS, &r); /* Ignore errors */
-
-#else
-
-                setrlimit(RLIMIT_DATA, &r); /* Ignore errors */
-
-#endif /* ^RLIMIT_AS */
-
-            }
-
-            r.rlim_max = r.rlim_cur = 0;
-
-            setrlimit(RLIMIT_CORE, &r); /* Ignore errors */
-
-            /* Move the process to the different namespace. */
-
-            if (netns_name)
-                move_process_to_netns();
-
-            /* Isolate the process and configure standard descriptors. If out_file is
-         specified, stdin is /dev/null; otherwise, out_fd is cloned instead. */
-
-            setsid();
-
-            dup2(dev_null_fd, 1);
-            dup2(dev_null_fd, 2);
-
-            if (out_file) {
-
-                dup2(dev_null_fd, 0);
-
-            } else {
-
-                dup2(out_fd, 0);
-                close(out_fd);
-
-            }
-
-            /* On Linux, would be faster to use O_CLOEXEC. Maybe TODO. */
-
-            close(dev_null_fd);
-            close(out_dir_fd);
-            close(dev_urandom_fd);
-            close(fileno(plot_file));
-
-            /* Set sane defaults for ASAN if nothing else specified. */
-
-            setenv("ASAN_OPTIONS", "abort_on_error=1:"
-                                   "detect_leaks=0:"
-                                   "symbolize=0:"
-                                   "allocator_may_return_null=1", 0);
-
-            setenv("MSAN_OPTIONS", "exit_code=" STRINGIFY(MSAN_ERROR) ":"
-                                   "symbolize=0:"
-                                   "msan_track_origins=0", 0);
-
-            execv(target_path, argv);
-
-            /* Use a distinctive bitmap value to tell the parent about execv()
-         falling through. */
-
-            *(u32 *) trace_bits = EXEC_FAIL_SIG;
-            exit(0);
-
-        }
-
-    } else {
-
-        s32 res;
-
-        /* In non-dumb mode, we have the fork server up and running, so simply
-       tell it to have at it, and then read back PID. */
-
-        if ((res = write(fsrv_ctl_fd, &prev_timed_out, 4)) != 4) {
-
-            if (stop_soon) return 0;
-            RPFATAL(res, "Unable to request new process from fork server (OOM?)");
-
-        }
-
-        if ((res = read(fsrv_st_fd, &child_pid, 4)) != 4) {
-
-            if (stop_soon) return 0;
-            RPFATAL(res, "Unable to request new process from fork server (OOM?)");
-
-        }
-
-        if (child_pid <= 0) FATAL("Fork server is misbehaving (OOM?)");
+        if (stop_soon) return 0;
+        RPFATAL(res, "Unable to request new process from fork server (OOM?)");
 
     }
+
+    if ((res = read(fsrv_st_fd, &child_pid, 4)) != 4) {
+
+        if (stop_soon) return 0;
+        RPFATAL(res, "Unable to request new process from fork server (OOM?)");
+
+    }
+
+    if (child_pid <= 0) FATAL("Fork server is misbehaving (OOM?)");
+
 
     /* Configure timeout, as requested by user, then wait for child to terminate. */
 
@@ -3059,21 +2932,13 @@ static u8 run_target(char **argv, u32 timeout) {
     setitimer(ITIMER_REAL, &it, NULL);
 
     /* The SIGALRM handler simply kills the child_pid and sets child_timed_out. */
+    send_over_network();
 
-    if (dumb_mode == 1 || no_forkserver) {
-        if (use_net) send_over_network();
-        if (waitpid(child_pid, &status, 0) <= 0) PFATAL("waitpid() failed");
 
-    } else {
-        if (use_net) send_over_network();
-        s32 res;
+    if ((res = read(fsrv_st_fd, &status, 4)) != 4) {
 
-        if ((res = read(fsrv_st_fd, &status, 4)) != 4) {
-
-            if (stop_soon) return 0;
-            RPFATAL(res, "Unable to communicate with fork server (OOM?)");
-
-        }
+        if (stop_soon) return 0;
+        RPFATAL(res, "Unable to communicate with fork server (OOM?)");
 
     }
 
@@ -3095,8 +2960,6 @@ static u8 run_target(char **argv, u32 timeout) {
      very normally and do not have to be treated as volatile. */
 
     MEM_BARRIER();
-
-    tb4 = *(u32 *) trace_bits;
 
 #ifdef WORD_SIZE_64
     classify_counts((u64 *) trace_bits);
@@ -3120,17 +2983,6 @@ static u8 run_target(char **argv, u32 timeout) {
 
     }
 
-    /* A somewhat nasty hack for MSAN, which doesn't support abort_on_error and
-     must use a special exit code. */
-
-    if (uses_asan && WEXITSTATUS(status) == MSAN_ERROR) {
-        kill_signal = 0;
-        return FAULT_CRASH;
-    }
-
-    if ((dumb_mode == 1 || no_forkserver) && tb4 == EXEC_FAIL_SIG)
-        return FAULT_ERROR;
-
     /* It makes sense to account for the slowest units only if the testcase was run
   under the user defined timeout. */
     if (!(timeout > exec_tmout) && (slowest_exec_ms < exec_ms)) {
@@ -3148,8 +3000,7 @@ static void show_stats(void);
    to warn about flaky or otherwise problematic test cases early on; and when
    new paths are discovered to detect variable behavior and so on. */
 
-static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
-                         u32 handicap, u8 from_queue) {
+static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem, u8 from_queue) {
 
 
     u8 fault = 0, new_bits = 0;
@@ -3217,7 +3068,6 @@ static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
 
     q->exec_us = (stop_us - start_us) / stage_max;
     q->bitmap_size = count_bytes(trace_bits);
-    q->handicap = handicap;
     q->cal_failed = 0;
 
     total_bitmap_size += q->bitmap_size;
@@ -3298,7 +3148,7 @@ static void perform_dry_run(char **argv) {
         /* AFLNet construct the kl_messages linked list for this queue entry*/
         kl_messages = construct_kl_messages(q->fname, q->regions, q->region_count);
 
-        res = calibrate_case(argv, q, use_mem, 0, 1);
+        res = calibrate_case(argv, q, use_mem, 1);
         ck_free(use_mem);
 
         /* Update state-aware variables (e.g., state machine, regions and their annotations */
@@ -3606,7 +3456,7 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault) {
     /* We use the actual length of all messages (full_len), not the len of the mutated message subsequence (len)*/
     add_to_queue(fn, full_len);
 
-    if (state_aware_mode) update_state_aware_variables(queue_top, 0);
+    update_state_aware_variables(queue_top, 0);
 
     /* save the seed to file for replaying */
     u8 *fn_replay = alloc_printf("%s/replayable-queue/%s", out_dir, basename(queue_top->fname));
@@ -4401,7 +4251,6 @@ static void show_stats(void) {
         last_stats_ms = cur_ms;
         write_stats_file(t_byte_ratio, stab_ratio, avg_exec);
         save_auto();
-        write_bitmap();
 
     }
 
@@ -5136,22 +4985,6 @@ static u32 calculate_score(struct queue_entry *q) {
     else if (q->bitmap_size * 2 < avg_bitmap_size) perf_score *= 0.5;
     else if (q->bitmap_size * 1.5 < avg_bitmap_size) perf_score *= 0.75;
 
-    /* Adjust score based on handicap. Handicap is proportional to how late
-     in the game we learned about this path. Latecomers are allowed to run
-     for a bit longer until they catch up with the rest. */
-
-    if (q->handicap >= 4) {
-
-        perf_score *= 4;
-        q->handicap -= 4;
-
-    } else if (q->handicap) {
-
-        perf_score *= 2;
-        q->handicap--;
-
-    }
-
     /* Final adjustment based on input depth, under the assumption that fuzzing
      deeper test cases is more likely to reveal stuff that can't be
      discovered with traditional fuzzers. */
@@ -5494,6 +5327,7 @@ static u8 fuzz_one(char **argv) {
         it = kl_next(it);
     }
     //其实从这里开始就可以使用梯度信息了。
+    //我还需要知道offset，用来保护一些字节不被变异
 
     orig_in = in_buf;
 
@@ -5517,12 +5351,6 @@ static u8 fuzz_one(char **argv) {
      testing in earlier, resumed runs (passed_det). */
 
     if (queue_cur->was_fuzzed)
-        goto havoc_stage;
-
-    /* Skip deterministic fuzzing if exec path checksum puts this out of scope
-     for this master instance. */
-
-    if (master_max && (queue_cur->exec_cksum % master_max) != master_id - 1)
         goto havoc_stage;
 
     doing_det = 1;
@@ -8188,7 +8016,7 @@ int main(int argc, char **argv) {
                 kh_val(khms_states, k)->selected_times++;
             }
 
-            selected_seed = choose_seed(target_state_id, seed_selection_algo);
+            selected_seed = choose_seed(seed_selection_algo);
         }
 
         seek_to_selected_seed(selected_seed);
@@ -8214,7 +8042,6 @@ int main(int argc, char **argv) {
         WARNF("error waitpid\n");
     }
 
-    write_bitmap();
     write_stats_file(0, 0, 0);
     save_auto();
 
@@ -8222,16 +8049,6 @@ int main(int argc, char **argv) {
 
     SAYF(CURSOR_SHOW cLRD "\n\n+++ Testing aborted %s +++\n" cRST,
          stop_soon == 2 ? "programmatically" : "by user");
-
-    /* Running for more than 30 minutes but still doing first cycle? */
-
-    if (queue_cycle == 1 && get_cur_time() - start_time > 30 * 60 * 1000) {
-
-        SAYF("\n" cYEL "[!] " cRST
-                     "Stopped during the first cycle, results may be incomplete.\n"
-                     "    (For info on resuming, see %s/README.)\n", doc_path);
-
-    }
 
     fclose(plot_file);
     destroy_queue();

@@ -71,7 +71,7 @@ A pratical fuzzing with a protocol (RTSP) with details will be given here.
 
 # commit records:
 
-# 6.2a
+### 6.2a
 
 can't trim any more.
 next step add byte analysis filter.
@@ -80,57 +80,57 @@ next step add byte analysis filter.
 Now focusing on egde coverage rate.
 
 
-# 6.1a
+### 6.1a
 trim the coding and ban the eagle
 
 18-20 counts/min!
 
-# 5.31a
+### 5.31a
 temporary named it light fuzz
 
-# 5.30a
+### 5.30a
 latest showmap
 
-# 5.28a
+### 5.28a
 update gonet-showmap and Makefile
 
-# 5.26a
+### 5.26a
 update new makefile
 
-# 5.25a
+### 5.25a
 add showmap module and update NN module
 
-# 4.07a
+### 4.07a
 some modification
-# 4.06a
+### 4.06a
 update run_target，
 Now trying to solve other structure. Socket communication
 
-# 4.01a
+### 4.01a
 Determine the route of implementation.
 next step:
 1. modify dry_run to meet network program and run_target corresponding to which.
 2, gen_mutation
 
-# 3.31a
+### 3.31a
 Temporary keep the copy seeds and pivot testcases.
 Now trying to build the whole structure and let it run up.
 
-# 3.26a
+### 3.26a
 add queue scheme(temporary not finished yet. read_testcases still need to debug and have a deep comprehension)
 
 neuzz abandon the queue scheme of AFL. and Fuzzing directly based on IO. (simple but low efficiency!)
 
 the original IO scheme is not efficient. Therefore I added read_testcases at this commit.
 
-# 3.25a
+### 3.25a
 refomat the the coding, should not effect the model.
 
-# 3.24a
+### 3.24a
 fix up the Version Error
 
 
-# 3.21a
+### 3.21a
 Some meaningless judgments and ifdefine affect the readability of the code
 
 The current experimental mode attempts to refactor code to streamline
@@ -138,6 +138,6 @@ The current experimental mode attempts to refactor code to streamline
 currently modified to dry_run
 
 
-# 3.13a
+### 3.13a
 Removed all code from previous gofuzz,
 The current new code uses AFLNet as the bottom layer

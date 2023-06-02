@@ -66,7 +66,7 @@ gonet-fuzz -d -i in -o out -N <server info> -x <dictionary file> -P <protocol> -
 ```
 
 # TBD
-A pratical fuzzing with a protocol (RTSP) with details will be given.
+A pratical fuzzing with a protocol (RTSP) with details will be given here.
 
 
 # commit records:

@@ -216,6 +216,8 @@ static void handle_stop_sig(int sig) {
    This function is called after every exec() on a fairly large buffer, so
    it needs to be fast. We do this in 32-bit and 64-bit flavors. */
 
+int send_over_network(){}
+
 static inline char has_new_bits(char* virgin_map) {
 
 #ifdef __x86_64__
@@ -996,7 +998,7 @@ static u8 run_target(int timeout) {
   setitimer(ITIMER_REAL, &it, NULL);
 
   /* The SIGALRM handler simply kills the child_pid and sets child_timed_out. */
-
+  send_over_network();
 
 
     if ((res = read(fsrv_st_fd, &status, 4)) != 4) {
@@ -1052,18 +1054,21 @@ static u8 run_target(int timeout) {
 
 static void write_to_testcase(void* mem, u32 len) {
 
-  int fd = out_fd;
+  // int fd = out_fd;
 
-    unlink(out_file); /* Ignore errors. */
+  //   unlink(out_file); /* Ignore errors. */
 
-    fd = open(out_file, O_WRONLY | O_CREAT | O_EXCL, 0600);
+  //   fd = open(out_file, O_WRONLY | O_CREAT | O_EXCL, 0600);
 
-    if (fd < 0) perror("Unable to create file");
+  //   if (fd < 0) perror("Unable to create file");
 
 
-  ck_write(fd, mem, len, out_file);
+  // ck_write(fd, mem, len, out_file);
 
-  close(fd);
+  // close(fd);
+
+  return;
+  //no need write_to_testcase;
 
 }
 
@@ -1685,6 +1690,9 @@ void gen_mutate_slow(){
 }
 
 /* dry run the seeds at dir, when stage == 1, save interesting seeds to out_dir; when stage == 2, compute the average exec time */
+//stage为1会保存有意思的种子，在fuzzing loop时stage为1
+//stage为2  即普通的dry_run
+//stage为0  为调试模式
 void dry_run(char* dir, int stage){
     DIR *dp;
     struct dirent *entry;

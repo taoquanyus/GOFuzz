@@ -21,7 +21,7 @@ from keras.layers import Dense, Dropout, Activation
 from keras.callbacks import ModelCheckpoint
 
 HOST = '127.0.0.1'
-PORT = 12012
+PORT = 2023
 
 MAX_FILE_SIZE = 10000
 MAX_BITMAP_SIZE = 2000
@@ -32,8 +32,8 @@ seed = 12
 np.random.seed(seed)
 random.seed(seed)
 set_random_seed(seed)
-seed_list = glob.glob('./seeds/*')
-new_seeds = glob.glob('./seeds/id_*')
+seed_list = glob.glob('./replayable-queue/*')
+new_seeds = glob.glob('./replayable-queue/id_*')
 SPLIT_RATIO = len(seed_list)
 # get binary argv
 argvv = sys.argv[1:]
@@ -49,24 +49,24 @@ def process_data():
 
     # shuffle training samples
     # todo:
-    seed_list = glob.glob('./seeds/*')
+    seed_list = glob.glob('./replayable-queue/*')
     seed_list.sort()
     SPLIT_RATIO = len(seed_list)
     rand_index = np.arange(SPLIT_RATIO)
     np.random.shuffle(seed_list)
-    new_seeds = glob.glob('./seeds/id_*')
+    new_seeds = glob.glob('./replayable-queue/id_*')
 
     call = subprocess.check_output
 
     # get MAX_FILE_SIZE
     cwd = os.getcwd()
-    max_file_name = call(['ls', '-S', cwd + '/seeds/']).decode('utf8').split('\n')[0].rstrip('\n')
-    MAX_FILE_SIZE = os.path.getsize(cwd + '/seeds/' + max_file_name)
+    max_file_name = call(['ls', '-S', cwd + '/replayable-queue/']).decode('utf8').split('\n')[0].rstrip('\n')
+    MAX_FILE_SIZE = os.path.getsize(cwd + '/replayable-queue/' + max_file_name)
 
     # create directories to save label, spliced seeds, variant length seeds, crashes and mutated seeds.
     # todo:
     os.path.isdir("./bitmaps/") or os.makedirs("./bitmaps")
-    os.path.isdir("./splice_seeds/") or os.makedirs("./splice_seeds")
+    # os.path.isdir("./splice_seeds/") or os.makedirs("./splice_seeds")
     os.path.isdir("./vari_seeds/") or os.makedirs("./vari_seeds")
     os.path.isdir("./crashes/") or os.makedirs("./crashes")
 
@@ -74,12 +74,18 @@ def process_data():
     raw_bitmap = {}
     tmp_cnt = []
     out = ''
+    cur_num = 0
     for f in seed_list:
+        cur_num += 1
+        print("dealing with " + str(cur_num) + "/" + str(len(seed_list)))
         tmp_list = []
         try:
-            # append "-o tmp_file" to strip's arguments to avoid tampering tested binary.
-            out = call(['./gonet-showmap', '-q', '-e', '-o', '/dev/stdout', '-m', '512', '-t', '500'] + argvv + [f]) # todo
-        except subprocess.CalledProcessError:
+            cmd = ['/home/mi/Desktop/space/live555/testProgs/out-live555/gonet-showmap', '-o', '/dev/stdout', '-m',
+                   '512', '-t', '500', '-p', 'RTSP', '-q', '-k', '8554', '-T', '1', '-S', '1000', '-f'] + [f] + argvv
+
+            out = call(cmd)
+
+        except subprocess.CalledProcessError as e:
             print("find a crash")
         for line in out.splitlines():
             edge = line.split(b':')[0]
@@ -152,7 +158,8 @@ def accur_1(y_true, y_pred):
     pred = tf.round(y_pred)
     summ = tf.constant(MAX_BITMAP_SIZE, dtype=tf.float32)
     wrong_num = tf.subtract(summ, tf.reduce_sum(tf.cast(tf.equal(y_true, pred), tf.float32), axis=-1))
-    right_1_num = tf.reduce_sum(tf.cast(tf.logical_and(tf.cast(y_true, tf.bool), tf.cast(pred, tf.bool)), tf.float32), axis=-1)
+    right_1_num = tf.reduce_sum(tf.cast(tf.logical_and(tf.cast(y_true, tf.bool), tf.cast(pred, tf.bool)), tf.float32),
+                                axis=-1)
     return K.mean(tf.divide(right_1_num, tf.add(right_1_num, wrong_num)))
 
 
@@ -201,6 +208,7 @@ def gen_adv2(f, fl, model, layer_list, idxx, splice):
         idx = np.flip(np.argsort(np.absolute(grads_value), axis=1)[:, -MAX_FILE_SIZE:].reshape((MAX_FILE_SIZE,)), 0)
         val = np.sign(grads_value[0][idx])
         adv_list.append((idx, val, fl[index]))
+        # 只考虑大小顺序，不考虑具体的值
 
     # do not generate spliced seed for the first round
     # if splice == 1 and round_cnt != 0:
@@ -236,7 +244,8 @@ def gen_adv3(f, fl, model, layer_list, idxx, splice):
         x = vectorize_file(fl[index])
         loss_value, grads_value = iterate([x])
         idx = np.flip(np.argsort(np.absolute(grads_value), axis=1)[:, -MAX_FILE_SIZE:].reshape((MAX_FILE_SIZE,)), 0)
-        #val = np.sign(grads_value[0][idx])
+
+        # val = np.sign(grads_value[0][idx])
         val = np.random.choice([1, -1], MAX_FILE_SIZE, replace=True)
         adv_list.append((idx, val, fl[index]))
 
@@ -281,7 +290,7 @@ def gen_mutate2(model, edge_num, sign):
     layer_list = [(layer.name, layer) for layer in model.layers]
 
     with open('gradient_info_p', 'w') as f:
-        for idxx in range(len(interested_indice[:])):
+        for idxx in range(len(interested_indice[:])):  # for each seed that we have interests
             # kears's would stall after multiple gradient compuation. Release memory and reload model to fix it.
             if idxx % 100 == 0:
                 del model
@@ -300,6 +309,7 @@ def gen_mutate2(model, edge_num, sign):
                 ele1 = [str(int(el)) for el in ele[1]]
                 ele2 = ele[2]
                 f.write(",".join(ele0) + '|' + ",".join(ele1) + '|' + ele2 + "\n")
+                print(",".join(ele0) + '|' + ",".join(ele1) + '|' + ele2 + "\n")
 
 
 def build_model():
@@ -363,5 +373,16 @@ def setup_server():
     conn.close()
 
 
+def debug_server():
+    cc = 1
+    while True:
+        cc += 1
+        if cc % 2 == 0:
+            gen_grad(b"train")
+        else:
+            gen_grad(b"sloww")
+
+
 if __name__ == '__main__':
-    setup_server()
+    # setup_server
+    debug_server()

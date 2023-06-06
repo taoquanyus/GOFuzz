@@ -296,7 +296,7 @@ static u32 write_bits(){
         if (!trace_bits[i]) continue;
         ret++;
     }
-    printf("%u\n", ret);
+//    printf("%u\n", ret);
 }
 int send_to_server() {
     //Wait for the server to initialize
@@ -359,7 +359,7 @@ int send_to_server() {
 
         if (fread(&size, sizeof(unsigned int), 1, fp) > 0) {//sizeof(unsigned int) = 4
             packet_count++;
-            fprintf(stderr, "\nSize of the current packet %d is  %d\n", packet_count, size);
+            if(!quiet_mode)fprintf(stderr, "\nSize of the current packet %d is  %d\n", packet_count, size);
 
             buf = (char *) ck_alloc(size);
             fread(buf, size, 1, fp);
@@ -378,25 +378,26 @@ int send_to_server() {
     close(sockfd);
 
     //Extract response codes
-    state_sequence = (*extract_response_codes)(response_buf, response_buf_size, &state_count);
+    if(!quiet_mode){
+        state_sequence = (*extract_response_codes)(response_buf, response_buf_size, &state_count);
+        fprintf(stderr, "\n--------------------------------");
+        fprintf(stderr, "\nResponses from server:");
 
-    fprintf(stderr, "\n--------------------------------");
-    fprintf(stderr, "\nResponses from server:");
+        for (i = 0; i < state_count; i++) {
+            fprintf(stderr, "%d-", state_sequence[i]);
+        }
 
-    for (i = 0; i < state_count; i++) {
-        fprintf(stderr, "%d-", state_sequence[i]);
+        fprintf(stderr, "\n++++++++++++++++++++++++++++++++\nResponses in details:\n");
+        for (i = 0; i < response_buf_size; i++) {
+            fprintf(stderr, "%c", response_buf[i]);
+        }
+        fprintf(stderr, "\n--------------------------------");
+
+        //Free memory
+        ck_free(state_sequence);
+        if (buf) ck_free(buf);
+        ck_free(response_buf);
     }
-
-    fprintf(stderr, "\n++++++++++++++++++++++++++++++++\nResponses in details:\n");
-    for (i = 0; i < response_buf_size; i++) {
-        fprintf(stderr, "%c", response_buf[i]);
-    }
-    fprintf(stderr, "\n--------------------------------");
-
-    //Free memory
-    ck_free(state_sequence);
-    if (buf) ck_free(buf);
-    ck_free(response_buf);
 }
 
 
@@ -425,14 +426,14 @@ static void run_target(char **argv) {
     child_pid = fork();
 //    sleep(10);
 
-    printf("pid: %d\n", child_pid);
+//    printf("pid: %d\n", child_pid);
     if (child_pid < 0) PFATAL("fork() failed");
 
     if (!child_pid) {
         //子进程
         struct rlimit r;
 
-        if (quiet_mode) {
+//        if (!quiet_mode) {
 
             s32 fd = open("/dev/null", O_RDWR);
 
@@ -443,7 +444,7 @@ static void run_target(char **argv) {
 
             close(fd);
 
-        }
+//        }
         if (mem_limit) {
 
             r.rlim_max = r.rlim_cur = ((rlim_t) mem_limit) << 20;
@@ -1003,7 +1004,7 @@ int main(int argc, char **argv) {
 
     }
 
-    exit(child_crashed * 2 + child_timed_out);
+    exit(child_crashed);
 
 }
 

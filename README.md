@@ -71,6 +71,10 @@ A pratical fuzzing with a protocol (RTSP) with details will be given here.
 
 # commit records:
 
+### 6.6a
+update gonnet-nnserver 
+fix the bugs of gonnet-showmap: (exits with code 1 when the testcase timeout).
+
 ### 6.4a
 update gonet-nnserver
 

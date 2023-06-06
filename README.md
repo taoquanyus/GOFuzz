@@ -71,6 +71,11 @@ A pratical fuzzing with a protocol (RTSP) with details will be given here.
 
 # commit records:
 
+### 6.6b
+remove the deterministic mutations of light fuzz.
+next step directly parse gradient file and mutate everything.
+
+
 ### 6.6a
 update gonnet-nnserver 
 fix the bugs of gonnet-showmap: (exits with code 1 when the testcase timeout).

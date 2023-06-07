@@ -237,13 +237,18 @@ struct queue_entry {
     u32 generating_state_id;            /* ID of the start at which the new seed was generated */
     u8 is_initial_seed;                 /* Is this an initial seed */
     u32 unique_state_count;             /* Unique number of states traversed by this queue entry */
-
+    int loc[10000];                     /* Array to store critical bytes locations*/
+    int sign[10000];                    /* Array to store critical bytes values*/
 };
 
-static struct queue_entry *queue,     /* Fuzzing queue (linked list)      */
+static struct queue_entry      /* Fuzzing queue (linked list)      */
 *queue_cur, /* Current offset within the queue  */
 *queue_top, /* Top of the list                  */
-*q_prev100; /* Previous 100 marker              */
+*q_prev100;
+static struct queue_entry *queue     /* Fuzzing queue (linked list)      */
+/* Current offset within the queue  */
+/* Top of the list                  */
+; /* Previous 100 marker              */
 
 static struct queue_entry *
         top_rated[MAP_SIZE];                /* Top entries for bitmap bytes     */
@@ -371,6 +376,11 @@ khash_t(hms) *khms_states;
 //M2_next points to the first message of M3 (i.e., suffix)
 //If M3 is empty, M2_next point to the end of the kl_messages linked list
 kliter_t(lms) *M2_prev, *M2_next;
+
+size_t len;                             /* Maximum file length for every mutation */
+
+int loc[10000];                         /* Array to store critical bytes locations*/
+int sign[10000];                        /* Array to store sign of critical bytes  */
 
 //Function pointers pointing to Protocol-specific functions
 unsigned int *
@@ -982,17 +992,15 @@ int send_over_network() {
 
     //Create a TCP/UDP socket
     int sockfd = -1;
-    if (net_protocol == PRO_TCP){
+    if (net_protocol == PRO_TCP) {
         sockfd = socket(AF_INET, SOCK_STREAM, 0);
-        int temp_flag=1;
-        int socket_set_flag = setsockopt( sockfd, IPPROTO_TCP, TCP_NODELAY, (char *)&temp_flag, sizeof(temp_flag) );
+        int temp_flag = 1;
+        int socket_set_flag = setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (char *) &temp_flag, sizeof(temp_flag));
         if (socket_set_flag == -1) {
             SAYF("Couldn't setsockopt(TCP_NODELAY)\n");
         }
-    }
-    else if (net_protocol == PRO_UDP)
+    } else if (net_protocol == PRO_UDP)
         sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-
 
 
     if (sockfd < 0) {
@@ -2185,7 +2193,7 @@ static void read_testcases(void) {
         struct stat st;
 
         u8 *fn = alloc_printf("%s/%s", in_dir, nl[i]->d_name);
-
+//        u8 *fn = alloc_printf("%s", nl[i]->d_name);
 
         free(nl[i]); /* not tracked */
 
@@ -4183,6 +4191,8 @@ static void check_term_size(void);
    execve() calls, plus in several other circumstances. */
 
 static void show_stats(void) {
+    printf("total execs %ld edge coverage %d.\n", total_execs, count_non_255_bytes(virgin_bits));
+    return;
 
     static u64 last_stats_ms, last_plot_ms, last_ms, last_execs;
     static double avg_exec;
@@ -5248,8 +5258,10 @@ static u8 fuzz_one(char **argv) {
     /* In state aware mode, select M2 based on the targeted state ID */
     u32 total_region = queue_cur->region_count;
     if (total_region == 0) PFATAL("0 region found for %s", queue_cur->fname);
-
+    int start_b = 0;
+    int end_b = 0;
     if (target_state_id == 0) {
+        start_b = 0;
         //No prefix subsequence (M1 is empty)
         M2_start_region_ID = 0;
         M2_region_count = 0;
@@ -5257,13 +5269,15 @@ static u8 fuzz_one(char **argv) {
         //To compute M2_region_count, we identify the first region which has a different annotation
         //Now we quickly compare the state count, we could make it more fine grained by comparing the exact response codes
         for (i = 0; i < queue_cur->region_count; i++) {
+
             if (queue_cur->regions[i].state_count != queue_cur->regions[0].state_count) break;
+            end_b=queue_cur->regions->end_byte;
             M2_region_count++;
         }
+
     } else {
         //M1 is unlikely to be empty
         M2_start_region_ID = 0;
-
         //Identify M2_start_region_ID first based on the target_state_id
         for (i = 0; i < queue_cur->region_count; i++) {
             u32 regionalStateCount = queue_cur->regions[i].state_count;
@@ -5271,17 +5285,28 @@ static u8 fuzz_one(char **argv) {
                 //reachableStateID is the last ID in the state_sequence
                 u32 reachableStateID = queue_cur->regions[i].state_sequence[regionalStateCount - 1];
                 M2_start_region_ID++;
+                //start byte of mutation
                 if (reachableStateID == target_state_id) break;
+
             } else {
                 //No annotation for this region
                 return 1;
             }
         }
+        //start byte of mutation
+        start_b = queue_cur->regions[M2_start_region_ID].start_byte;
 
         //Then identify M2_region_count
         for (i = M2_start_region_ID; i < queue_cur->region_count; i++) {
             if (queue_cur->regions[i].state_count != queue_cur->regions[M2_start_region_ID].state_count) break;
             M2_region_count++;
+        }
+
+        //end byte of mutation
+        if(M2_region_count>0){
+            end_b = queue_cur->regions[M2_start_region_ID+M2_region_count-1].end_byte;
+        }else{
+            end_b = queue_cur->regions[M2_start_region_ID].end_byte;
         }
 
         //Handle corner case(s) and skip the current queue entry
@@ -5304,6 +5329,7 @@ static u8 fuzz_one(char **argv) {
 
         if (count == M2_start_region_ID + M2_region_count) {
             M2_next = it;
+            //这里按道理可以直接break了
         }
         count++;
     }
@@ -5362,32 +5388,6 @@ static u8 fuzz_one(char **argv) {
     u32 _bf = (_b); \
     _arf[(_bf) >> 3] ^= (128 >> ((_bf) & 7)); \
   } while (0)
-
-        /* While flipping the least significant bit in every byte, pull of an extra
-       trick to detect possible syntax tokens. In essence, the idea is that if
-       you have a binary blob like this:
-
-       xxxxxxxxIHDRxxxxxxxx
-
-       ...and changing the leading and trailing bytes causes variable or no
-       changes in program flow, but touching any character in the "IHDR" string
-       always produces the same, distinctive path, it's highly likely that
-       "IHDR" is an atomically-checked magic value of special significance to
-       the fuzzed format.
-
-       We do this here, rather than as a separate stage, because it's a nice
-       way to keep the operation approximately "free" (i.e., no extra execs).
-
-       Empirically, performing the check when flipping the least significant bit
-       is advantageous, compared to doing it at the time of more disruptive
-       changes, where the program flow may be affected in more violent ways.
-
-       The caveat is that we won't generate dictionaries in the -d mode or -S
-       mode - but that's probably a fair trade-off.
-
-       This won't work particularly well with paths that exhibit variable
-       behavior, but fails gracefully, so we'll carry out the checks anyway.
-
 
     /* Effector map setup. These macros calculate:
 
@@ -6030,7 +6030,7 @@ static u8 fuzz_one(char **argv) {
     /* Update pending_not_fuzzed count if we made it through the calibration
      cycle and have not seen this entry before. */
 
-    if (!stop_soon && !queue_cur->cal_failed ){
+    if (!stop_soon && !queue_cur->cal_failed) {
         was_fuzzed_map[get_state_index(target_state_id)][queue_cur->index] = 1;
         pending_not_fuzzed--;
         if (queue_cur->favored) pending_favored--;
@@ -6154,8 +6154,143 @@ static void check_if_tty(void) {
 
 }
 
+void copy_file(char *src, char *dst) {
+    FILE *fptr1, *fptr2;
+    int c;
+    fptr1 = fopen(src, "r");
+    if (fptr1 == NULL) {
+        printf("Cannot open file %s \n", src);
+        exit(0);
+    }
+
+    fptr2 = fopen(dst, "w");
+    if (fptr2 == NULL) {
+        printf("Cannot open file %s \n", dst);
+        exit(0);
+    }
+
+    c = fgetc(fptr1);
+    while (c != EOF) {
+        fputc(c, fptr2);
+        c = fgetc(fptr1);
+    }
+
+    fclose(fptr1);
+    fclose(fptr2);
+    return;
+}
+
+/* parse one line of gradient string into array */
+void parse_array(char *str, int *array) {
+
+    int i = 0;
+
+    char *token = strtok(str, ",");
+
+    while (token != NULL) {
+        array[i] = atoi(token);
+        i++;
+        token = strtok(NULL, ",");
+    }
+
+    return;
+}
 
 /* Check terminal dimensions after resize. */
+
+
+char *extract_id(char *str) {
+    // there should be the same id with same queue.
+
+    // find the place that "id:" appear
+    char *start = strstr(str, "id:");
+    if (start == NULL) {
+        return NULL;
+    }
+
+    // find the first place that "," appear
+    char *end = strchr(start, ',');
+    if (end == NULL) {
+        return NULL;
+    }
+
+    // the length of id
+    int len = end - start - 3; //
+
+    char *id = malloc((len + 1) * sizeof(char));
+    if (id == NULL) {
+        return NULL;
+    }
+
+    strncpy(id, start + 3, len);
+    id[len] = '\0';  // 添加字符串结束符
+
+    return id;
+}
+
+
+static void read_gradient_file() {
+    ACTF("Reading gradient_file ...");
+    copy_file("gradient_info_p", "gradient_info");
+    FILE *stream = fopen("gradient_info", "r");
+    char *line = NULL;
+    size_t llen = 0;
+    ssize_t nread;
+    if (stream == NULL) {
+        perror("fopen");
+        exit(EXIT_FAILURE);
+    }
+    int line_cnt = 0;
+    struct queue_entry *temp_queue = queue;
+
+
+    while ((nread = getline(&line, &llen, stream)) != -1) {
+        line_cnt = line_cnt + 1;
+
+        /* parse gradient info */
+        char *loc_str = strtok(line, "|");
+        char *sign_str = strtok(NULL, "|");
+        char *fn = strtok(strtok(NULL, "|"), "\n");
+
+        int flag = 0;
+        int read = 1;
+
+        // store the gradient info into arr
+        if (!temp_queue) {//if the temp_queue is empty, let it back to top.
+            temp_queue = queue;
+            flag = 1;
+        }
+
+        // extract the id from the filename, note the id could be null
+        char *queue_id = extract_id(temp_queue->fname);
+        char *fn_id = extract_id(fn);
+
+        while (!queue_id || strcmp(queue_id, fn_id) != 0) {
+            temp_queue = temp_queue->next;
+            if (temp_queue == NULL) {
+                if (flag == 1) {
+                    read = 0;
+                    break;
+                }
+                temp_queue = queue;
+                flag = 1;
+            }
+            queue_id = extract_id(temp_queue->fname);
+            if (!queue_id) continue;
+        }
+
+        if (read) {
+            parse_array(loc_str, temp_queue->loc);
+            parse_array(sign_str, temp_queue->sign);
+//            ACTF("Read successfully!");
+//            ACTF("queue_id: %s\t fn_id: %s \n",fn_id,queue_id);
+//            ACTF("id:%s\tloc_str: %d,%d \n",fn_id,temp_queue->loc[0],temp_queue->sign[1]);
+        }
+        free(fn_id);
+        free(queue_id);
+    }
+}
+
 
 static void check_term_size(void) {
 
@@ -7041,6 +7176,7 @@ int main(int argc, char **argv) {
     setup_ipsm();
     setup_dirs_fds();
     read_testcases();
+    read_gradient_file();
     load_auto();
 
     pivot_inputs();

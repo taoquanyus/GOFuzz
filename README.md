@@ -71,6 +71,11 @@ A pratical fuzzing with a protocol (RTSP) with details will be given here.
 
 # commit records:
 
+### 6.7b
+change the mutation method of light-fuzz.
+remove all original mutation methods.
+identify the start byte and the end byte of queueing.
+
 ### 6.6b
 remove the deterministic mutations of light fuzz.
 next step directly parse gradient file and mutate everything.

@@ -78,7 +78,8 @@ EXP_ST u8 *in_dir,                    /* Input directory with test cases  */
 *doc_path,                  /* Path to documentation dir        */
 *target_path,               /* Path to target binary            */
 *orig_cmdline;              /* Original command line            */
-
+static u8 *out_buf1, *out_buf2, *out_buf3;
+static u8 *out_buf;
 EXP_ST u32 exec_tmout = EXEC_TIMEOUT; /* Configurable exec timeout (ms)   */
 static u32 hang_tmout = EXEC_TIMEOUT; /* Timeout used for hang det (ms)   */
 
@@ -109,6 +110,7 @@ run_over10m,               /* Run time over 10 minutes?        */
 persistent_mode,           /* Running in persistent mode?      */
 deferred_mode,             /* Deferred forkserver mode?        */
 fast_cal;                  /* Try to calibrate faster?         */
+int fast=1;
 
 static s32 out_fd,                    /* Persistent fd for out_file       */
 dev_urandom_fd = -1,       /* Persistent fd for /dev/urandom   */
@@ -168,6 +170,7 @@ bytes_trim_out,            /* Bytes coming outa the trimmer    */
 blocks_eff_total,          /* Blocks subject to effector maps  */
 blocks_eff_select;         /* Blocks selected as fuzzable      */
 
+int num_index[14] = {0,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192};
 static u32 subseq_tmouts;             /* Number of timeouts in a row      */
 
 static u8 *stage_name = "init",       /* Name of the current fuzz stage   */
@@ -175,7 +178,6 @@ static u8 *stage_name = "init",       /* Name of the current fuzz stage   */
 *syncing_party;             /* Currently syncing with...        */
 
 static s32 stage_cur, stage_max;      /* Stage progression                */
-static s32 splicing_with = -1;        /* Splicing with which test case?   */
 
 static u32 syncing_case;              /* Syncing with case #...           */
 
@@ -237,6 +239,7 @@ struct queue_entry {
     u32 generating_state_id;            /* ID of the start at which the new seed was generated */
     u8 is_initial_seed;                 /* Is this an initial seed */
     u32 unique_state_count;             /* Unique number of states traversed by this queue entry */
+    int has_gradient;
     int loc[10000];                     /* Array to store critical bytes locations*/
     int sign[10000];                    /* Array to store critical bytes values*/
 };
@@ -320,6 +323,7 @@ static inline u32 UR(u32 limit);
 
 static inline u8 has_new_bits(u8 *virgin_map);
 
+static u8 fuzz_one(char **argv);
 /* AFLNet-specific variables & functions */
 
 u32 server_wait_usecs = 5000;
@@ -378,9 +382,6 @@ khash_t(hms) *khms_states;
 kliter_t(lms) *M2_prev, *M2_next;
 
 size_t len;                             /* Maximum file length for every mutation */
-
-int loc[10000];                         /* Array to store critical bytes locations*/
-int sign[10000];                        /* Array to store sign of critical bytes  */
 
 //Function pointers pointing to Protocol-specific functions
 unsigned int *
@@ -1534,6 +1535,7 @@ static void add_to_queue(u8 *fname, u32 len) {
     q->generating_state_id = target_state_id;
     q->is_initial_seed = 0;
     q->unique_state_count = 0;
+    q->has_gradient=0;
 
     if (q->depth > max_depth) max_depth = q->depth;
 
@@ -3362,9 +3364,6 @@ static u8 *describe_op(u8 hnb) {
 
         sprintf(ret, "src:%06u", current_entry);
 
-        if (splicing_with >= 0)
-            sprintf(ret + strlen(ret), "+%06u", splicing_with);
-
         sprintf(ret + strlen(ret), ",op:%s", stage_short);
 
         if (stage_cur_byte >= 0) {
@@ -4798,16 +4797,15 @@ static void show_init_stats(void) {
    error conditions, returning 1 if it's time to bail out. This is
    a helper function for fuzz_one(). */
 
-EXP_ST u8 common_fuzz_stuff(char **argv, u8 *out_buf, u32 len) {
+EXP_ST u8 common_fuzz_stuff(char **argv, u32 mutate_len, char *mutate_buf) {
 
     u8 fault;
 
 
     /* AFLNet update kl_messages linked list */
-
     // parse the out_buf into messages
     u32 region_count = 0;
-    region_t *regions = (*extract_requests)(out_buf, len, &region_count);
+    region_t *regions = (*extract_requests)(mutate_buf, mutate_len, &region_count);
     if (!region_count) PFATAL("AFLNet Region count cannot be Zero");
 
     // update kl_messages linked list
@@ -4830,7 +4828,7 @@ EXP_ST u8 common_fuzz_stuff(char **argv, u8 *out_buf, u32 len) {
         m->mdata = (char *) ck_alloc(len);
         m->msize = len;
         if (m->mdata == NULL) PFATAL("Unable to allocate memory region to store new message");
-        memcpy(m->mdata, &out_buf[regions[i].start_byte], len);
+        memcpy(m->mdata, &mutate_buf[regions[i].start_byte], len);
 
         //Insert the message to the linked list
         *kl_pushp(lms, kl_messages) = m;
@@ -4879,12 +4877,9 @@ EXP_ST u8 common_fuzz_stuff(char **argv, u8 *out_buf, u32 len) {
     } while (cur_it != M2_next);
 
     /* End of AFLNet code */
-
     fault = run_target(argv, exec_tmout);
-
     //Update fuzz count, no matter whether the generated test is interesting or not
     if (state_aware_mode) update_fuzzs();
-
     if (stop_soon) return 1;
 
     if (fault == FAULT_TMOUT) {
@@ -4908,10 +4903,10 @@ EXP_ST u8 common_fuzz_stuff(char **argv, u8 *out_buf, u32 len) {
     }
 
     /* This handles FAULT_ERROR for us: */
+    queued_discovered += save_if_interesting(argv, mutate_buf, len, fault);
 
-    queued_discovered += save_if_interesting(argv, out_buf, len, fault);
-
-    if (!(total_execs % 10)) show_stats();
+    if (!(total_execs % 10))
+        show_stats();
 
     return 0;
 
@@ -5229,14 +5224,210 @@ static u8 could_be_interest(u32 old_val, u32 new_val, u8 blen, u8 check_le) {
 }
 
 
+static int mutate_gradient1(int start_b, int end_b){
+    int tmout_cnt = 0;
+
+    /* flip interesting locations within 14 iterations */
+    for(int iter=0 ;iter<13; iter=iter+1){
+        memcpy(out_buf1, out_buf, len);
+        memcpy(out_buf2, out_buf, len);
+        /* find mutation range for every iteration */
+        int low_index = num_index[iter];
+        int up_index = num_index[iter+1];
+        u8 up_step = 0;
+        u8 low_step = 0;
+        for(int index=low_index; index<up_index; index=index+1){
+            int cur_up_step = 0;
+            int cur_low_step = 0;
+            if(queue_cur->loc[index]<start_b||queue_cur->loc[index]>end_b) continue;
+            if(queue_cur->sign[index] == 1){
+                cur_up_step = (255 - (u8)out_buf[queue_cur->loc[index]-start_b]);
+                if(cur_up_step > up_step)
+                    up_step = cur_up_step;
+                cur_low_step = (u8)(out_buf[queue_cur->loc[index]-start_b]);
+                if(cur_low_step > low_step)
+                    low_step = cur_low_step;
+            }
+            else{
+                cur_up_step = (u8)out_buf[queue_cur->loc[index]-start_b];
+                if(cur_up_step > up_step)
+                    up_step = cur_up_step;
+                cur_low_step = (255 - (u8)out_buf[queue_cur->loc[index]-start_b]);
+                if(cur_low_step > low_step)
+                    low_step = cur_low_step;
+            }
+        }
+
+        /* up direction mutation(up to 255) */
+        for(int step=0;step<up_step;step=step+1){
+            int mut_val;
+            for(int index=low_index; index<up_index; index=index+1){
+                if(queue_cur->loc[index]<start_b||queue_cur->loc[index]>end_b) continue;
+                mut_val = ((u8)out_buf1[queue_cur->loc[index]-start_b] + queue_cur->sign[index]);
+                if(mut_val < 0)
+                    out_buf1[queue_cur->loc[index]-start_b] = 0;
+                else if (mut_val > 255)
+                    out_buf1[queue_cur->loc[index]-start_b] = 255;
+                else
+                    out_buf1[queue_cur->loc[index]-start_b] = mut_val;
+            }
+            if (common_fuzz_stuff(use_argv, len,out_buf1)) return 1;
+
+        }
+
+        /* low direction mutation(up to 255) */
+        for(int step=0;step<low_step;step=step+1){
+            for(int index=low_index; index<up_index;index=index+1){
+                if(queue_cur->loc[index]<start_b||queue_cur->loc[index]>end_b) continue;
+                int mut_val = ((u8)out_buf2[queue_cur->loc[index]] - queue_cur->sign[index]);
+                if(mut_val < 0)
+                    out_buf2[queue_cur->loc[index]] = 0;
+                else if (mut_val > 255)
+                    out_buf2[queue_cur->loc[index]] = 255;
+                else
+                    out_buf2[queue_cur->loc[index]] = mut_val;
+            }
+            if (common_fuzz_stuff(use_argv, len,out_buf2)) return 1;
+
+        }
+    }
+
+    /* random insertion/deletion */
+    int cut_len = 0;
+    int del_loc = 0;
+    int rand_loc = 0;
+    for(int del_count=0; del_count < 1024;del_count= del_count+1){
+        if(queue_cur->loc[del_count]<start_b||queue_cur->loc[del_count]>end_b) continue;
+        del_loc = queue_cur->loc[del_count]-start_b;
+        if ((len- del_loc) <= 2)
+            continue;
+        cut_len = choose_block_len(len-1-del_loc);
+
+        /* random deletion at a critical offset */
+        memcpy(out_buf1, out_buf,del_loc);
+        memcpy(out_buf1+del_loc, out_buf+del_loc+cut_len, len-del_loc-cut_len);
+
+        if (common_fuzz_stuff(use_argv, len-cut_len,out_buf1)) return 1;
+
+
+        cut_len = choose_block_len(len-1);
+        rand_loc = (random()%cut_len);
+
+        /* random insertion at a critical offset */
+        memcpy(out_buf3, out_buf, del_loc);
+        memcpy(out_buf3+del_loc, out_buf+rand_loc, cut_len);
+        memcpy(out_buf3+del_loc+cut_len, out_buf+del_loc, len-del_loc);
+        if (common_fuzz_stuff(use_argv, len+cut_len,out_buf3)) return 1;
+    }
+}
+
+
+static int mutate_gradient2(int start_b, int end_b){
+    int tmout_cnt = 0;
+
+    /* flip interesting locations within 14 iterations */
+    for(int iter=0 ;iter<13; iter=iter+1){
+        memcpy(out_buf1, out_buf, len);
+        memcpy(out_buf2, out_buf, len);
+        /* find mutation range for every iteration */
+        int low_index = num_index[iter];
+        int up_index = num_index[iter+1];
+        u8 up_step = 0;
+        u8 low_step = 0;
+        for(int index=low_index; index<up_index; index=index+1){
+            int cur_up_step = 0;
+            int cur_low_step = 0;
+            if(queue_cur->loc[index]<start_b||queue_cur->loc[index]>end_b) continue;
+            if(queue_cur->sign[index] == 1){
+                cur_up_step = (255 - (u8)out_buf[queue_cur->loc[index]-start_b]);
+                if(cur_up_step > up_step)
+                    up_step = cur_up_step;
+                cur_low_step = (u8)(out_buf[queue_cur->loc[index]-start_b]);
+                if(cur_low_step > low_step)
+                    low_step = cur_low_step;
+            }
+            else{
+                cur_up_step = (u8)out_buf[queue_cur->loc[index]-start_b];
+                if(cur_up_step > up_step)
+                    up_step = cur_up_step;
+                cur_low_step = (255 - (u8)out_buf[queue_cur->loc[index]-start_b]);
+                if(cur_low_step > low_step)
+                    low_step = cur_low_step;
+            }
+        }
+
+        /* up direction mutation(up to 255) */
+        for(int step=0;step<up_step;step=step+1){
+            int mut_val;
+            for(int index=low_index; index<up_index; index=index+1){
+                if(queue_cur->loc[index]<start_b||queue_cur->loc[index]>end_b) continue;
+                mut_val = ((u8)out_buf1[queue_cur->loc[index]-start_b] + queue_cur->sign[index]);
+                if(mut_val < 0)
+                    out_buf1[queue_cur->loc[index]-start_b] = 0;
+                else if (mut_val > 255)
+                    out_buf1[queue_cur->loc[index]-start_b] = 255;
+                else
+                    out_buf1[queue_cur->loc[index]-start_b] = mut_val;
+            }
+            if (common_fuzz_stuff(use_argv, len,out_buf1)) return 1;
+
+        }
+
+        /* low direction mutation(up to 255) */
+        for(int step=0;step<low_step;step=step+1){
+            for(int index=low_index; index<up_index;index=index+1){
+                if(queue_cur->loc[index]<start_b||queue_cur->loc[index]>end_b) continue;
+                int mut_val = ((u8)out_buf2[queue_cur->loc[index]] - queue_cur->sign[index]);
+                if(mut_val < 0)
+                    out_buf2[queue_cur->loc[index]] = 0;
+                else if (mut_val > 255)
+                    out_buf2[queue_cur->loc[index]] = 255;
+                else
+                    out_buf2[queue_cur->loc[index]] = mut_val;
+            }
+            if (common_fuzz_stuff(use_argv, len,out_buf2)) return 1;
+
+        }
+    }
+
+    /* random insertion/deletion */
+    int cut_len = 0;
+    int del_loc = 0;
+    int rand_loc = 0;
+    for(int del_count=0; del_count < 4096;del_count= del_count+1){
+        if(queue_cur->loc[del_count]<start_b||queue_cur->loc[del_count]>end_b) continue;
+        del_loc = queue_cur->loc[del_count]-start_b;
+        if ((len- del_loc) <= 2)
+            continue;
+        cut_len = choose_block_len(len-1-del_loc);
+
+        /* random deletion at a critical offset */
+        memcpy(out_buf1, out_buf,del_loc);
+        memcpy(out_buf1+del_loc, out_buf+del_loc+cut_len, len-del_loc-cut_len);
+
+        if (common_fuzz_stuff(use_argv, len-cut_len,out_buf1)) return 1;
+
+
+        cut_len = choose_block_len(len-1);
+        rand_loc = (random()%cut_len);
+
+        /* random insertion at a critical offset */
+        memcpy(out_buf3, out_buf, del_loc);
+        memcpy(out_buf3+del_loc, out_buf+rand_loc, cut_len);
+        memcpy(out_buf3+del_loc+cut_len, out_buf+del_loc, len-del_loc);
+        if (common_fuzz_stuff(use_argv, len+cut_len,out_buf3)) return 1;
+    }
+}
+
+
 /* Take the current entry from the queue, fuzz it for a while. This
    function is a tad too long... returns 0 if fuzzed successfully, 1 if
    skipped or bailed out. */
 
 static u8 fuzz_one(char **argv) {
 
-    s32 len, fd, temp_len, i, j;
-    u8 *in_buf = NULL, *out_buf, *orig_in, *ex_tmp, *eff_map = 0;
+    s32 fd, temp_len, i, j;
+    u8 *in_buf = NULL, *orig_in, *ex_tmp, *eff_map = 0;
     u64 havoc_queued, orig_hit_cnt, new_hit_cnt;
     u32 perf_score = 100, orig_perf, prev_cksum, eff_cnt = 1, M2_len;
 
@@ -5342,7 +5533,6 @@ static u8 fuzz_one(char **argv) {
     }
 
     u32 in_buf_size = 0;
-    // inbuf 就是我要变异的内容
     while (it != M2_next) {
         in_buf = (u8 *) ck_realloc(in_buf, in_buf_size + kl_val(it)->msize);
         if (!in_buf) PFATAL("AFLNet cannot allocate memory for in_buf");
@@ -5357,6 +5547,9 @@ static u8 fuzz_one(char **argv) {
 
     orig_in = in_buf;
 
+    // in_buf, out_buf, orig_in
+    // out_buf 才是我需要变异的东西
+
     out_buf = ck_alloc_nozero(in_buf_size);
     memcpy(out_buf, in_buf, in_buf_size);
 
@@ -5365,6 +5558,7 @@ static u8 fuzz_one(char **argv) {
 
     //Save the len for later use
     M2_len = len;
+
 
     /*********************
    * PERFORMANCE SCORE *
@@ -5401,15 +5595,35 @@ static u8 fuzz_one(char **argv) {
 #define EFF_REM(_x)           ((_x) & ((1 << EFF_MAP_SCALE2) - 1))
 #define EFF_ALEN(_l)          (EFF_APOS(_l) + !!EFF_REM(_l))
 #define EFF_SPAN_ALEN(_p, _l) (EFF_APOS((_p) + (_l) - 1) - EFF_APOS(_p) + 1)
+    if(!queue_cur->has_gradient){
+        SAYF("current queue :%s is skip gradient_mutation\n",queue_cur->fname);
+        goto skip_gradient_mutate;
+    }
+    SAYF("current queue :%s is in gradient_mutation!\n",queue_cur->fname);
+    /********************
+   * Gradient Mutation *
+   *********************/
 
+    stage_name = "gradient_mutate";
+    stage_short = "grad_mt";
+    memset(out_buf1,0,4);
+    memset(out_buf2,0,len);
+    memset(out_buf3,0, 20000);
+    if(fast==1){
+        if(mutate_gradient1(start_b,end_b)==1){
+            goto abandon_entry;
+        }
+    }else{
+        if(mutate_gradient2(start_b,end_b)==1){
+            goto abandon_entry;
+        }
+    }
 
-
+    skip_gradient_mutate:
     /****************
    * RANDOM HAVOC *
    ****************/
-
-    havoc_stage:
-
+    SAYF("start HAVOC!\n");
     stage_cur_byte = -1;
 
     /* The havoc stage mutation code is also invoked when splicing files; if the
@@ -5894,7 +6108,7 @@ static u8 fuzz_one(char **argv) {
 
         }
 
-        if (common_fuzz_stuff(argv, out_buf, temp_len))
+        if (common_fuzz_stuff(argv, temp_len, out_buf))
             goto abandon_entry;
 
         /* out_buf might have been mangled a bit, so let's restore it to its
@@ -5924,108 +6138,11 @@ static u8 fuzz_one(char **argv) {
 
     stage_finds[STAGE_HAVOC] += new_hit_cnt - orig_hit_cnt;
     stage_cycles[STAGE_HAVOC] += stage_max;
-
-
-//#ifndef IGNORE_FINDS
-//
-//    /************
-//   * SPLICING *
-//   ************/
-//
-//    /* This is a last-resort strategy triggered by a full round with no findings.
-//     It takes the current input file, randomly selects another input, and
-//     splices them together at some offset, then relies on the havoc
-//     code to mutate that blob. */
-//
-//    retry_splicing:
-//
-//    if (use_splicing && splice_cycle++ < SPLICE_CYCLES &&
-//        queued_paths > 1 && M2_len > 1) {
-//
-//        struct queue_entry *target;
-//        u32 tid, split_at;
-//        u8 *new_buf;
-//        s32 f_diff, l_diff;
-//
-//        /* First of all, if we've modified in_buf for havoc, let's clean that
-//       up... */
-//
-//        if (in_buf != orig_in) {
-//            ck_free(in_buf);
-//            in_buf = orig_in;
-//            len = M2_len;
-//        }
-//
-//        /* Pick a random queue entry and seek to it. Don't splice with yourself. */
-//
-//        do { tid = UR(queued_paths); } while (tid == current_entry);
-//
-//        splicing_with = tid;
-//        target = queue;
-//
-//        while (tid >= 100) {
-//            target = target->next_100;
-//            tid -= 100;
-//        }
-//        while (tid--) target = target->next;
-//
-//        /* Make sure that the target has a reasonable length. */
-//
-//        while (target && (target->len < 2 || target == queue_cur)) {
-//            target = target->next;
-//            splicing_with++;
-//        }
-//
-//        if (!target) goto retry_splicing;
-//
-//        /* Read the testcase into a new buffer. */
-//
-//        fd = open(target->fname, O_RDONLY);
-//
-//        if (fd < 0) PFATAL("Unable to open '%s'", target->fname);
-//
-//        new_buf = ck_alloc_nozero(target->len);
-//
-//        ck_read(fd, new_buf, target->len, target->fname);
-//
-//        close(fd);
-//
-//        /* Find a suitable splicing location, somewhere between the first and
-//       the last differing byte. Bail out if the difference is just a single
-//       byte or so. */
-//
-//        locate_diffs(in_buf, new_buf, MIN(len, target->len), &f_diff, &l_diff);
-//
-//        if (f_diff < 0 || l_diff < 2 || f_diff == l_diff) {
-//            ck_free(new_buf);
-//            goto retry_splicing;
-//        }
-//
-//        /* Split somewhere between the first and last differing byte. */
-//
-//        split_at = f_diff + UR(l_diff - f_diff);
-//
-//        /* Do the thing. */
-//
-//        len = target->len;
-//        memcpy(new_buf, in_buf, split_at);
-//        in_buf = new_buf;
-//
-//        ck_free(out_buf);
-//        out_buf = ck_alloc_nozero(len);
-//        memcpy(out_buf, in_buf, len);
-//
-//        goto havoc_stage;
-//
-//    }
-//
-//#endif /* !IGNORE_FINDS */
-
     ret_val = 0;
+
 
     abandon_entry:
 
-    splicing_with = -1;
 
     /* Update pending_not_fuzzed count if we made it through the calibration
      cycle and have not seen this entry before. */
@@ -6280,6 +6397,7 @@ static void read_gradient_file() {
         }
 
         if (read) {
+            temp_queue->has_gradient=1;
             parse_array(loc_str, temp_queue->loc);
             parse_array(sign_str, temp_queue->sign);
 //            ACTF("Read successfully!");
@@ -7214,6 +7332,18 @@ int main(int argc, char **argv) {
     if (state_ids_count == 0) {
         PFATAL("No server states have been detected. Server responses are likely empty!");
     }
+
+    //set up mutation memory
+    out_buf1 = malloc(10000);
+    if(!out_buf1)
+        perror("malloc failed");
+    out_buf2 = malloc(10000);
+    if(!out_buf2)
+        perror("malloc failed");
+    out_buf3 = malloc(20000);
+    if(!out_buf3)
+        perror("malloc failed");
+
 
     while (1) {
         struct queue_entry *selected_seed = NULL;

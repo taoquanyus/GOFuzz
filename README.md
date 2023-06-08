@@ -71,6 +71,14 @@ A pratical fuzzing with a protocol (RTSP) with details will be given here.
 
 # commit records:
 
+
+### 6.8a
+That is, add gradient module on light-fuzz 
+and finish the Debugging of light-fuzz.
+
+next steps:
+modify the file diretory.
+
 ### 6.7b
 change the mutation method of light-fuzz.
 remove all original mutation methods.

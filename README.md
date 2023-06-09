@@ -1,16 +1,38 @@
 
 
 
-## Prerequisites
+# Prerequisites
 
 ```bash
+sudo dpkg --add-architecture i386
+sudo apt-get update
+sudo apt-get install libc6:i386 libncurses5:i386 libstdc++6:i386 lib32z1
+
 # Install clang (as required by GONet to enable llvm_mode)
 sudo apt-get install clang
 # Install graphviz development
 sudo apt-get install graphviz-dev libcap-dev
+
+
+```
+### Python Environment:
+- Python 2.7
+- Tensorflow
+- Keras
+
+We highly recommend to use conda virtual env to avoid the python version shift problem.
+
+
+# Before Start
+Set CPU scaling algorithm and core dump notification with root.
+
+```
+cd /sys/devices/system/cpu
+echo performance | tee cpu*/cpufreq/scaling_governor
+echo core >/proc/sys/kernel/core_pattern
 ```
 
-## GONet
+# Build GONet
 
 
 ```bash
@@ -27,10 +49,10 @@ make
 # Move to GONet's parent folder
 cd ../..
 #Setup PATH environment variables
-export GONet=$(pwd)/GONet
+export GONet=$(pwd)/GOFuzz
 export WORKDIR=$(pwd)
 export PATH=$PATH:$GONet
-export GO_PATH=$GONet
+export AFL_PATH=$GONet
 ```
 
 # Usage
@@ -65,8 +87,59 @@ Example command:
 gonet-fuzz -d -i in -o out -N <server info> -x <dictionary file> -P <protocol> -D 10000 -q 3 -s 3 -E -K -R <executable binary and its arguments (e.g., port number)>
 ```
 
+# Applying GONet in live555
+
+A pratical example in fuzzing with a protocol (RTSP).
+
+### Build Live555
+```bash
+cd $WORKDIR
+# Clone live555 repository
+git clone https://github.com/rgaufman/live555.git
+# Move to the folder
+cd live555
+# Checkout the buggy version of Live555
+git checkout ceeb4f4
+# Apply a patch. See the detailed explanation for the patch below
+patch -p1 < $AFLNET/tutorials/live555/ceeb4f4_states_decomposed.patch
+# Generate Makefile
+./genMakefiles linux
+# Compile the source
+make clean all
+```
+
+### Generate the Gradient File. 
+```bash
+# Copy the showmap file and NN Server to target program DIR.
+cd $GONet
+cp ./gonet-showmap ./gonet-nnserver.py $WORKDIR/live555/testProgs/
+cp ./Materials/live555/queue ./Materials/Live555/queue/replayable-queue $WORKDIR/live555/testProgs/
+
+# Start Training (may take hours.)
+cd $WORKDIR/live555/testProgs
+python gonet-nnserver.py ./testOnDemandRTSPServer 8554
+```
+
+### Test Live555
+```bash
+# test live555 to make sure everything is ok.
+cd $WORKDIR/live555/testProgs
+./testOnDemandRTSPServer 8554
+
+# Crtl+C (exit).
+```
+
+### Fuzzing
+```bash
+# Make sure in the right DIR
+cd $WORKDIR/live555/testProgs
+# Start Fuzz
+light-fuzz -d -i $GONet//live555/in-rtsp -o out-live555 -N tcp://127.0.0.1/8554 -x $GONet/tutorials/live555/rtsp.dict -P RTSP -D 10000 -q 3 -s 3 -E -K -R ./testOnDemandRTSPServer 8554
+```
+
+
 # TBD
-A pratical fuzzing with a protocol (RTSP) with details will be given here.
+
 
 
 # commit records:
@@ -135,7 +208,7 @@ Now trying to solve other structure. Socket communication
 Determine the route of implementation.
 next step:
 1. modify dry_run to meet network program and run_target corresponding to which.
-2, gen_mutation
+2. gen_mutation
 
 ### 3.31a
 Temporary keep the copy seeds and pivot testcases.

@@ -6354,7 +6354,7 @@ static void read_gradient_file() {
     size_t llen = 0;
     ssize_t nread;
     if (stream == NULL) {
-        perror("fopen");
+        perror("Error in reading gradient_info");
         exit(EXIT_FAILURE);
     }
     int line_cnt = 0;

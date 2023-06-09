@@ -1,0 +1,211 @@
+SETUP rtsp://127.0.0.1:8554/mp3AudioTest/track1 RTSP/1.0
+CSeq: 3
+User-Agent: ./testRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Transport: RT9
+
+PLAY rtsp://127.0.0.1:8554/matroskaFileTest/ RTSP/1.0r-Agent:./testRDESCRIBEt (LIVE5Û5 Streaming Media v2018.08.28)
+Session: 000022B8
+IBE rtsp://127.0.0.1E8554/matroskaFile4est RTSP1.0
+CSeq: 2stRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Accept: application/sdp
+
+SRangETUP rtsp://127.0.0. :8554/mpegack1 RTSP/1.0
+C3eq: 3
+Us1.0
+CSeq: 3
+User-Agener-AQent: ./testRTSPCluent (LIVE555 Streaming Media8
+Range: npt=0.000-ort: RTP/AVP;uniÅast;c-50779
+
+PLAY rtsp://127.0.0.1:8554/matroskaFileTest/ RTSP/1.0r-Agunt:./testRDESCRIBEt (LIVE5Û5 Streaming Media v2018.08.28)
+Session: 000022B8
+IBE rtsp://d27.0.0.1:8554/matroskaFile4est RTSP1.0
+CSeq: 2stRTSPClient (LIVE555 Streaming Media v2018.08.28)ˇˇept: application/sdp
+
+SRangETUP rtsp://127.0.0. :8554/mpegllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllack1 RTSP/1.0
+C3eq: 3
+Us1.0
+CSeq: 3
+User-Agener-AQent: ./testRTSPCluent (LIVE555 Streaming Media8
+Range: npt=0.000-ort: RTP/AVP;un000022B8iÅast;c-50779
+
+PLAY rtsp://127.0.0.1:8554/matroskaFileTest/ RTSP/1.0r-Agent:./testRDESCRIBEt (LIVE5Û5 Streaming Media v2018.08.28)
+Session: 000022B8
+IBE rtsp://127.0.0.1:8554/matroskaFile4est RTSP1.0
+CSeq: 2stRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Accept: application/sdp
+
+SRangETUP rtsp://127.0.0. :8554/mpegack1 RTSP/1.0
+C3eq: 3
+Us1.0
+CSeq: 3
+User-Agener-AQent: ./testRTSPCluent (LIVE555 Streaming Media8
+Range: npt=0.000-ort: RTP/AVP;uniÅast;c-50779
+
+PLAY rtsp://127.0.0.1:8554/matroskaFileTest/ RTSP/1.0r-Agunt:./testRDESCRIBEt (LIVE5Û5 Streaming Media v2018.08.28)
+Session: 000022B8
+IBE rtsp://d27.0.0.1:8554/matroskaFile4est RTSP1.0
+CSeq: 2stRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Accept: application/sdp
+
+SRangETUP rtsp://127.0.0. :8554/mpegack1 RTSP/1.0
+C3eq: 3
+Us1.0
+CSeq: 3
+User-Agener-AQent: ./testRTSPCluent (LIVE555 Streaming Media8
+Range: npt=0.000-ort: RTP/AVP;un000022B8iÅast;c-50779
+
+PLAY rtsp://127.0.0.1:8554/matroskaFileTest/ RTSP/1.0r-Agent:./testRDESCRIBEt (LIVE5Û5 Streaming Media v2018.08.28)
+Session: 000022B8
+IBE rtsp://127.0.0.1E8554/matroskaFile4est RTSP1.0
+CSeq: 2stRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Accept: application/sdp
+
+SRangETUP rtsp://127.0.0. :8554/mpegack1 RTSP/1.0
+C3eq: 3
+Us1.0
+CSeq: 3
+User-Agener-AQent: ./testRTSPCluent (LIVE555 Streaming Media8
+Range: npt=0.000-ort: RTP/AVP;uniÅast;c-50779
+
+PLAY rtsp://127.0.0.1:8554/matroskaFileTest/ RTSP/1.0r-Agunt:./tesíRP rtsp://127.0.0. :8554/ming Media v2018.08.28)
+Session: 000022B8
+IBE rtsp://d27.0.0.:H554/matroskaFile4est RTSP1.0
+CSeq: 2stRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Accept: application/sdp
+
+SRangETUP rtsp://127.0.0. :8554/mpegack1 RTSP/1.0
+C3eq: 3
+Us1.0
+CSeq: 3
+User-Agener-AQent: ./testRTSPCluent (LIVE555 Streaming Media8
+Range: npt=0.000-ort: RTP/AVP;un000022B8iÅast;c-50779
+
+PLAY rtsp://127.0.0.1:8554/matrosk.28)
+Session: 000022B8
+IBE rtsp://127.0.0.1:8554/matrosent (LIVE555 StkaFile4est RTSP1.0
+CSeq: 2stRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Accept: application/sdp
+
+TEARDOWN rtsp://127.0.0.1:8554/mpeg1or2AudioVideoTest/ RTSP/1.0
+CSeq: 6t: ./testRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Session: 000022B8
+
+SETUP rtsp://127.0.0.1:8554/mp3AudioTest/track1 RTSP/1.0
+CSeq: 3
+User-Agent: ./testRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Transport: RT9
+
+PLAY rtsp://127.0.0.1:8554/matroskaFileTest/ RTSP/1.0r-Agent:./testRDESCRIBEt (LIVE5Û5 Streaming Media v2018.08.28)
+Session: 000022B8
+IBE rtsp://127.0.0.1E8554/matroskaFile4est RTSP1.0
+CSeq: 2stRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Accept: application/sdp
+
+SRangETUP rtsp://127.0.0. :8554/mpegack1 RTSP/1.0
+C3eq: 3
+Us1.0
+CSeq: 3
+User-Agener-AQent: ./testRTSPCluent (LIVE555 Streaming Media8
+Range: npt=0.000-ort: RTP/AVP;uniÅast;c-50779
+
+PLAY rtsp://127.0.0.1:8554/matroskaFileTest/ RTSP/1.0r-Agunt:./testRDESCRIBEt (LIVE5Û5 Streaming Media v2018.08.28)
+Session: 000022B8
+IBE rtsp://d27.0.0.1:8554/matroskaFile4est RTSP1.0
+CSeq: 2stRTSPClient (LIVE555 Streamang Media v2018.08.28)ˇˇept: application/sdp
+
+SRangETUP rtsp://127.0.0. :8554/mpegllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllack1 RTSP/1.0
+C3eq: 3
+Us1.0
+CSeq: 3
+User-Agener-AQent: ./testRTSPCluent (LIVE555 Streaming Media8
+Range: npt=0.000-ort: RTP/AVP;un000022B8iÅast;c-50779
+
+PLAY rtsp://127.0.0.1:8554/matroskaFileTest/ RTSP/1.0r-Agent:./testRDESCRIBEt (LIVE5Û5 Streaming Media v2018.08.28)
+Session: 000022B8
+IBE rtsp://127.0.0.1:8554/matroskaFile4est RTSP1.0
+CSeq: 2stRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Accept: application/sdp
+
+SRangETUP rtsp://127.0.0. :8554/mpegack1 RTSP/1.0
+C3eq: 3
+Us1.0
+CSeq: 3
+User-Agener-AQent: ./testRTSPCluent (LIVE555 Streaming Media8
+Range: npt=0.000-ort: RTP/AVP;uniÅast;c-50779
+
+PLAY rtsp://127.0.0.1:8554/matroskaFileTest/ RTSP/1.0r-Agunt:./testRDESCRIBEt (LIVE5Û5 Streaming Media v2018.08.28)
+Session: 000022B8
+IBE rtsp://d27.0.0.1:8554/matroskaFile4est RTSP1.0
+CSeq: 2stRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Accept: application/sdp
+
+SRangETUP rtsp://127.0.0. :8554/mpegack1 RTSP/1.0
+C3eq: 3
+Us1.0
+CSeq: 3
+User-Agener-AQent: ./testRTSPCluent (LIVE555 Streaming Media8
+Range: npt=0.000-ort: RTP/AVP;un000022B8iÅast;c-50779
+
+PLAY rtsp://127.0.0.1:8554/matroskaFileTest/ RTSP/1.0r-Agent:./testRDESCRIBEt (LIVE5Û5 Streaming Media v2018.08.28)
+Session: 000022B8
+IBE rtsp://127.0.0.1E8554/matroskaFile4est RTSP1.0
+CSeq: 2stRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Accept: application/sdp
+
+SRangETUP rtsp://127.0.0. :8554/mpegack1 RTSP/1.0
+C3eq: 3
+Us1.0
+CSeq: 3
+User-Agener-AQent: ./testRTSPCluent (LIVE555 Streaming Media8
+Range: npt=0.000-ort: RTP/AVP;uniÅast;c-50779
+
+PLAY rtsp://127.0.0.1:8554/matroskaFileTest/ RTSP/1.0r-Agunt:./tesíRP rtsp://127.0.0. :8554/ming Media v2018.08.28)
+Session: 000022B8
+IBE rtsp://d27.0.0.:H554/matroskaFile4est RTSP1.0
+CSeq: 2stRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Accept: application/sdp
+
+SRangETUP rtsp://127.0.0. :8554/mpegack1 RTSP/1.0
+C3eq: 3
+Us1.0
+CSeq: 3
+User-Agener-AQent: ./testRTSPCluent (LIVE555 Streaming Media8
+Range: npt=0.000-ort: RTP/AVP;un000022B8iÅast;c-50779
+
+PLAY rtsp://127.0.0.1:8554/matrosk.28)
+Session: 000022B8
+IBE rtsp://127.0.0.1:8554/matrosent (LIVE555 StkaFile4est RTSP1.0
+CSeq: 2stRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Accept: application/sdp
+
+TEARDOWN rtsp://127.0.0.1:8554/mpeg1or2AudioVideoTest/ RTSP/1.0
+CSeq: 6t: ./testRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Session: 000022B8
+
+TEARDOWN rtsp://127.0.0.1S8554/wavAudioT]st/ RTSP/1.0
+CSeq: 5
+User-Agent: ./testRTSPClient (LIVE555 Straming Media v2018.08.28)
+Session: 000022B8
+
+SETUP rtsp://127.0.0.1:8554/matroskaFileTest/track1 RTSP/1.0
+CSeq: 3
+User-Agent: ./testRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Transport: RTP/AVP;unicast;client_port=37216-37217
+
+SETUP rtsp://127.0.0.1:8554/matroskaFileTest/track2 RTSP/1.0
+CSeq: 4
+User-Agent: ./testRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Transport: RTP/AVP;unicast;client_port=49022-49023
+Session: 000022B8
+
+PLAY rtsp://127.0.0.1:8554/matroskaFileTest/ RTSP/1.0
+CSeq: 5
+User-Agent: ./testRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Session: 000022B8
+Range: npt=0.000-
+
+TEARDOWN rtsp://127.0.0.1:8554/matroskaFileTest/ RTSP/1.0
+CSeq: 6
+User-Agent: ./testRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Session: 000022B8
+

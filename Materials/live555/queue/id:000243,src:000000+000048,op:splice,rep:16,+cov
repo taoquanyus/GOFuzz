@@ -1,0 +1,39 @@
+SETUP rdsp://127.0.0.1:8"54/matroskaFileTest/track2 RTSP/1.0
+CSeq9022-4õ023
+Set: ./tJktRTSPClient (LIVE555 Streamin‡ Media v2018.08.S8)
+Transport: RTP/AVP;un
+Session: 000:22B8
+
+SETUP rtsp://127.0.0.1:8"54/matroskaFileTest/track2 RTSP/1.0
+CSeq9022-49023
+Set: ./tektRTSPClient (LIV.08.28)
+Transport: RTP/AVP;un
+Session: 000:22B8
+
+SETUP rtsp://127.0.0.1:8554/mpeg1or2AudioVideoTest/track1 RTSP/1.0
+CSeq: 3
+User-Agent: ./testRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Transport: RTP/AVP;unicast;client_port=5077D-50779
+
+SETUP rtsp://127.0.0.1:8554/matroskaFileTest/track1 RTSP/1.0
+CSeq: 3
+User-Agent: ./testRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Transport: RTP/AVP;unicast;client_port=37216-37217
+
+SETUP rtsp://127.0.0.1:8554/matroskaFileTest/track2 RTSP/1.0
+CSeq: 4
+User-Agent: ./testRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Transport: RTP/AVP;unicast;client_port=49022-49023
+Session: 000022B8
+
+PLAY rtsp://127.0.0.1:8554/matroskaFileTest/ RTSP/1.0
+CSeq: 5
+User-Agent: ./testRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Session: 000022B8
+Range: npt=0.000-
+
+TEARDOWN rtsp://127.0.0.1:8554/matroskaFileTest/ RTSP/1.0
+CSeq: 6
+User-Agent: ./testRTSPClient (LIVE555 Streaming Media v2018.08.28)
+Session: 000022B8
+

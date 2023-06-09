@@ -23,7 +23,7 @@ from keras.callbacks import ModelCheckpoint
 HOST = '127.0.0.1'
 PORT = 2023
 
-MAX_FILE_SIZE = 10000
+MAX_FILE_SIZE = 100000
 MAX_BITMAP_SIZE = 2000
 round_cnt = 0
 # Choose a seed for random initilzation
@@ -67,8 +67,8 @@ def process_data():
     # todo:
     os.path.isdir("./bitmaps/") or os.makedirs("./bitmaps")
     # os.path.isdir("./splice_seeds/") or os.makedirs("./splice_seeds")
-    os.path.isdir("./vari_seeds/") or os.makedirs("./vari_seeds")
-    os.path.isdir("./crashes/") or os.makedirs("./crashes")
+    # os.path.isdir("./vari_seeds/") or os.makedirs("./vari_seeds")
+    # os.path.isdir("./crashes/") or os.makedirs("./crashes")
 
     # obtain raw bitmaps
     raw_bitmap = {}
@@ -76,16 +76,18 @@ def process_data():
     out = ''
     cur_num = 0
     for f in seed_list:
+        if cur_num % 5 == 1:
+            print("it may take minutes.")
         cur_num += 1
-        print("dealing with " + str(cur_num) + "/" + str(len(seed_list)))
+        print("tracking the bitmaps of seed " + str(cur_num) + "/" + str(len(seed_list)))
         tmp_list = []
         try:
-            cmd = ['/home/mi/Desktop/space/live555/testProgs/out-live555/gonet-showmap', '-o', '/dev/stdout', '-m',
+            cmd = [cwd + '/gonet-showmap', '-o', '/dev/stdout', '-m',
                    '512', '-t', '500', '-p', 'RTSP', '-q', '-k', '8554', '-T', '1', '-S', '1000', '-f'] + [f] + argvv
 
             out = call(cmd)
 
-        except subprocess.CalledProcessError as e:
+        except subprocess.CalledProcessError:
             print("find a crash")
         for line in out.splitlines():
             edge = line.split(b':')[0]
@@ -309,11 +311,12 @@ def gen_mutate2(model, edge_num, sign):
                 ele1 = [str(int(el)) for el in ele[1]]
                 ele2 = ele[2]
                 f.write(",".join(ele0) + '|' + ",".join(ele1) + '|' + ele2 + "\n")
-                print(",".join(ele0) + '|' + ",".join(ele1) + '|' + ele2 + "\n")
+                # print(",".join(ele0) + '|' + ",".join(ele1) + '|' + ele2 + "\n")
 
 
 def build_model():
-    batch_size = 32
+    # batch_size = 32
+    batch_size = 2
     num_classes = MAX_BITMAP_SIZE
     epochs = 50
 
@@ -335,7 +338,10 @@ def train(model):
     loss_history = LossHistory()
     lrate = keras.callbacks.LearningRateScheduler(step_decay)
     callbacks_list = [loss_history, lrate]
-    model.fit_generator(train_generate(16),
+    # batch_size = 16
+    batch_size = 1
+
+    model.fit_generator(train_generate(batch_size),
                         steps_per_epoch=(SPLIT_RATIO / 16 + 1),
                         epochs=100,
                         verbose=1, callbacks=callbacks_list)

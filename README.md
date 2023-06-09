@@ -144,6 +144,13 @@ light-fuzz -d -i $GONet//live555/in-rtsp -o out-live555 -N tcp://127.0.0.1/8554 
 
 # commit records:
 
+### 6.9a
+Update:
+1. gonet-showmap DIR config
+2. gonet-nnserver DIR 
+3. light-server
+4. README 
+5. Makefile
 
 ### 6.8a
 That is, add gradient module on light-fuzz 

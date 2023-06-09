@@ -1,7 +1,11 @@
+# GONet
+
+GONet is a Gradient-Oriented graybox fuzzing tool for stateful network protocols.
+
+Before Fuzzing, We highly recommend you to read [Neuzz](https://github.com/Dongdongshe/neuzz) and [AFLNet](https://github.com/aflnet/aflnet) to know some basic concepts about fuzzing especially for stateful network.
 
 
-
-# Prerequisites
+## Prerequisites
 
 ```bash
 sudo dpkg --add-architecture i386
@@ -20,11 +24,11 @@ sudo apt-get install graphviz-dev libcap-dev
 - Tensorflow
 - Keras
 
-We highly recommend to use conda virtual env to avoid the python version shift problem.
+We recommend to use conda virtual env to avoid the python version shift problem.
 
 
-# Before Start
-Set CPU scaling algorithm and core dump notification with root.
+## Before Start
+Set CPU scaling algorithm and core dump notification with **root**.
 
 ```
 cd /sys/devices/system/cpu
@@ -32,7 +36,7 @@ echo performance | tee cpu*/cpufreq/scaling_governor
 echo core >/proc/sys/kernel/core_pattern
 ```
 
-# Build GONet
+## Build GONet
 
 
 ```bash
@@ -55,7 +59,7 @@ export PATH=$PATH:$GONet
 export AFL_PATH=$GONet
 ```
 
-# Usage
+## Usage
 
 GONet has following options:
 
@@ -87,7 +91,7 @@ Example command:
 gonet-fuzz -d -i in -o out -N <server info> -x <dictionary file> -P <protocol> -D 10000 -q 3 -s 3 -E -K -R <executable binary and its arguments (e.g., port number)>
 ```
 
-# Applying GONet in live555
+## Applying GONet in live555
 
 A pratical example in fuzzing with a protocol (RTSP).
 
@@ -101,11 +105,20 @@ cd live555
 # Checkout the buggy version of Live555
 git checkout ceeb4f4
 # Apply a patch. See the detailed explanation for the patch below
-patch -p1 < $AFLNET/tutorials/live555/ceeb4f4_states_decomposed.patch
+patch -p1 < $GONet/tutorials/live555/ceeb4f4_states_decomposed.patch
 # Generate Makefile
 ./genMakefiles linux
 # Compile the source
 make clean all
+```
+
+### Test Live555
+```bash
+# test live555 to make sure everything is ok.
+cd $WORKDIR/live555/testProgs
+./testOnDemandRTSPServer 8554
+
+# Crtl+C (exit).
 ```
 
 ### Generate the Gradient File. 
@@ -120,15 +133,6 @@ cd $WORKDIR/live555/testProgs
 python gonet-nnserver.py ./testOnDemandRTSPServer 8554
 ```
 
-### Test Live555
-```bash
-# test live555 to make sure everything is ok.
-cd $WORKDIR/live555/testProgs
-./testOnDemandRTSPServer 8554
-
-# Crtl+C (exit).
-```
-
 ### Fuzzing
 ```bash
 # Make sure in the right DIR
@@ -138,11 +142,11 @@ light-fuzz -d -i $GONet/tutorials/live555/in-rtsp -o out-live555 -N tcp://127.0.
 ```
 
 
-# TBD
+## TBD
 
 
 
-# commit records:
+## commit records:
 
 ### 6.9a
 Update:

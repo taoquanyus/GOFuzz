@@ -113,7 +113,7 @@ make clean all
 # Copy the showmap file and NN Server to target program DIR.
 cd $GONet
 cp ./gonet-showmap ./gonet-nnserver.py $WORKDIR/live555/testProgs/
-cp ./Materials/live555/queue ./Materials/Live555/queue/replayable-queue $WORKDIR/live555/testProgs/
+cp -r ./Materials/live555/queue ./Materials/live555/replayable-queue $WORKDIR/live555/testProgs/
 
 # Start Training (may take hours.)
 cd $WORKDIR/live555/testProgs
@@ -134,7 +134,7 @@ cd $WORKDIR/live555/testProgs
 # Make sure in the right DIR
 cd $WORKDIR/live555/testProgs
 # Start Fuzz
-light-fuzz -d -i $GONet//live555/in-rtsp -o out-live555 -N tcp://127.0.0.1/8554 -x $GONet/tutorials/live555/rtsp.dict -P RTSP -D 10000 -q 3 -s 3 -E -K -R ./testOnDemandRTSPServer 8554
+light-fuzz -d -i $GONet/tutorials/live555/in-rtsp -o out-live555 -N tcp://127.0.0.1/8554 -x $GONet/tutorials/live555/rtsp.dict -P RTSP -D 10000 -q 3 -s 3 -E -K -R ./testOnDemandRTSPServer 8554
 ```
 
 

@@ -148,37 +148,40 @@ light-fuzz -d -i $GONet/tutorials/live555/in-rtsp -o out-live555 -N tcp://127.0.
 
 ## commit records:
 
+### 6.11a
+Fix the DIR Error in `gonet-showmap.c`
+
 ### 6.9a
 Update:
-1. gonet-showmap DIR config
-2. gonet-nnserver DIR 
-3. light-server
-4. README 
-5. Makefile
+1. `gonet-showmap` DIR config
+2. `gonet-nnserver` DIR 
+3. `light-server`
+4. `README` 
+5. `Makefile`
 
 ### 6.8a
-That is, add gradient module on light-fuzz 
-and finish the Debugging of light-fuzz.
+That is, add gradient module on `light-fuzz` 
+and finish the Debugging of `light-fuzz`.
 
 next steps:
 modify the file diretory.
 
 ### 6.7b
-change the mutation method of light-fuzz.
+change the mutation method of `light-fuzz`.
 remove all original mutation methods.
 identify the start byte and the end byte of queueing.
 
 ### 6.6b
-remove the deterministic mutations of light fuzz.
+remove the deterministic mutations of `light fuzz`.
 next step directly parse gradient file and mutate everything.
 
 
 ### 6.6a
-update gonnet-nnserver 
-fix the bugs of gonnet-showmap: (exits with code 1 when the testcase timeout).
+update `gonnet-nnserver` 
+fix the bugs of `gonnet-showmap`: (exits with code 1 when the testcase timeout).
 
 ### 6.4a
-update gonet-nnserver
+update `gonet-nnserver`
 
 ### 6.2a
 

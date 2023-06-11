@@ -470,9 +470,9 @@ static void run_target(char **argv) {
         if (!getenv("LD_BIND_LAZY")) setenv("LD_BIND_NOW", "1", 0);
 
         setsid();
-        char* argv_list[] = {"testOnDemandRTSPServer","8554",NULL};
+        char* argv_list[] = {use_argv[0],use_argv[1],NULL};
 
-        if(execv("/home/mi/Desktop/workspace/live555/testProgs/testOnDemandRTSPServer", argv_list)==-1){
+        if(execv(use_argv[0], argv_list)==-1){
             printf("execv:error!");
         }
 
